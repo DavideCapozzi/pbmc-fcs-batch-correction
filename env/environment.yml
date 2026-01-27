@@ -1,0 +1,19 @@
+name: pbmc-fcs-batch-correction
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - r-base
+  - r-tidyverse
+  - r-devtools
+  - r-biocmanager
+  - bioconductor-flowcore
+  - bioconductor-flowsom
+  - bioconductor-scater
+  - bioconductor-singlecellexperiment
+  - bioconductor-complexheatmap
+  - r-yaml
+  - r-r.utils
+  - r-ggridges
+  - r-cowplot
