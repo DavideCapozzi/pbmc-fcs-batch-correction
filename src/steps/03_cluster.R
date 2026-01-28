@@ -17,7 +17,7 @@ source("src/functions/clustering.R")
 message("\n=== PIPELINE STEP 3: CLUSTERING ===")
 
 # 1. Load Config
-config <- read_yaml("config/params.yaml")
+config <- read_yaml("config/global_params.yml")
 in_file <- file.path(config$directories$processed, "corrected_sce.rds")
 out_file <- file.path(config$directories$processed, "clustered_sce.rds")
 
@@ -60,5 +60,5 @@ tryCatch({
 }, error = function(e) {
   message("\n[Error] Step 3 Failed:")
   message(e$message)
-  quit(status = 1)
+  stop(paste("[Step 3 Fatal]", e$message), call. = FALSE)
 })

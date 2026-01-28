@@ -22,7 +22,7 @@ message("\n=== PIPELINE STEP 1: DATA INGESTION ===")
 
 # 1. Load Configuration
 # ------------------------------------------------------------------------------
-config_path <- "config/params.yaml"
+config_path <- "config/global_params.yml"
 if (!file.exists(config_path)) stop("[Fatal] Config file not found: ", config_path)
 config <- read_yaml(config_path)
 
@@ -100,5 +100,5 @@ tryCatch({
 }, error = function(e) {
   message("\n[Error] Pipeline Step 1 Failed:")
   message(e$message)
-  quit(status = 1)
+  stop(paste("[Step 1 Error]", e$message), call. = FALSE)
 })

@@ -1,3 +1,15 @@
+
+# ## Installation
+
+# 1. Create the environment:
+#    ```bash
+#    micromamba create -f env/environment.yml
+#    micromamba activate pbmc-fcs-batch-correction
+# Install custom packages:
+
+# Bash
+# Rscript -e "remotes::install_github('biosurf/cyCombine', upgrade = 'never')"
+
 # ==============================================================================
 # CONFIGURATION: PBMC BATCH CORRECTION
 # ==============================================================================
@@ -8,6 +20,7 @@ n_cores: 4
 
 # Directory Structure
 directories:
+
   raw: "data/01_raw"
   intermediate: "data/02_intermediate"
   processed: "data/03_processed"
@@ -38,14 +51,13 @@ markers:
     - "SSC-W"
     - "Width"
     - "Cell_length"
+clustering:
+  xdim: 10              
+  ydim: 10
+  n_metaclusters: 20    
+  seed: 1234
 
-# ## Installation
-
-# 1. Create the environment:
-#    ```bash
-#    micromamba create -f env/environment.yml
-#    micromamba activate pbmc-fcs-batch-correction
-# Install custom packages:
-
-# Bash
-# Rscript -e "remotes::install_github('biosurf/cyCombine', upgrade = 'never')"
+dimred:
+  n_neighbors: 15
+  min_dist: 0.1
+  seed: 1234

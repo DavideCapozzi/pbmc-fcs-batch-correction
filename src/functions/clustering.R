@@ -19,61 +19,63 @@ run_flowsom_clustering <- function(sce, markers, config) {
   
   message("[Clustering] Initializing FlowSOM...")
   
+  # FIXED: Force integer types for critical configuration parameters.
+  # This prevents "list" vs "integer" errors from YAML parsing inconsistencies.
+  xdim_val <- as.integer(config$xdim)
+  ydim_val <- as.integer(config$ydim)
+  seed_val <- as.integer(config$seed)
+  k_val    <- as.integer(config$n_metaclusters)
+  
   # 1. Create FlowFrame for FlowSOM
-  # FlowSOM works natively with flowFrames or matrices.
   exprs_mat <- t(assay(sce, "exprs"))
   
   # 2. Build SOM (Self-Organizing Map)
-  # Use set.seed for reproducibility of the starting weights
-  set.seed(config$seed)
+  set.seed(seed_val)
   
   fsom <- tryCatch({
     FlowSOM::ReadInput(
       input = exprs_mat,
-      transform = FALSE, # Data is already transformed/corrected
-      scale = FALSE      # cyCombine output is already on comparable scale
+      transform = FALSE, 
+      scale = FALSE      
     )
   }, error = function(e) stop("FlowSOM Input Prep failed: ", e$message))
   
-  message(sprintf("[Clustering] Building SOM Grid %dx%d...", config$xdim, config$ydim))
+  message(sprintf("[Clustering] Building SOM Grid %dx%d...", xdim_val, ydim_val))
   
   fsom <- tryCatch({
     FlowSOM::BuildSOM(
       fsom,
       colsToUse = markers,
-      xdim = config$xdim,
-      ydim = config$ydim
+      xdim = xdim_val, # Use sanitized integer
+      ydim = ydim_val  # Use sanitized integer
     )
   }, error = function(e) stop("FlowSOM BuildSOM failed: ", e$message))
   
-  # 3. Build MST (Minimal Spanning Tree) - Optional but good for viz
+  # 3. Build MST
   fsom <- FlowSOM::BuildMST(fsom)
   
-  # 4. Metaclustering (ConsensusClusterPlus)
-  message(sprintf("[Clustering] Consensus Metaclustering into %d populations...", config$n_metaclusters))
+  # 4. Metaclustering
+  message(sprintf("[Clustering] Consensus Metaclustering into %d populations...", k_val))
   
   meta_clustering <- tryCatch({
     suppressMessages(
       ConsensusClusterPlus::ConsensusClusterPlus(
         t(fsom$map$codes),
-        maxK = config$n_metaclusters,
+        maxK = k_val,
         reps = 100, 
         pItem = 0.9, 
         pFeature = 1, 
         title = tempdir(), 
         plot = "png", 
         verbose = FALSE,
-        seed = config$seed
+        seed = seed_val
       )
     )
   }, error = function(e) stop("Metaclustering failed: ", e$message))
   
-  # Extract specific K
-  k <- config$n_metaclusters
-  metacluster_codes <- meta_clustering[[k]]$consensusClass
+  metacluster_codes <- meta_clustering[[k_val]]$consensusClass
   
   # 5. Map back to individual cells
-  # fsom$map$mapping contains the grid assignment (1..100) for each cell
   cluster_assignments <- fsom$map$mapping[, 1]
   metacluster_assignments <- metacluster_codes[cluster_assignments]
   
@@ -81,7 +83,6 @@ run_flowsom_clustering <- function(sce, markers, config) {
   sce$cluster_id <- as.factor(cluster_assignments)
   sce$metacluster_id <- as.factor(metacluster_assignments)
   
-  # Store the FlowSOM object in metadata for plotting later
   metadata(sce)$FlowSOM <- fsom
   
   return(sce)

@@ -2,13 +2,14 @@
 # ==============================================================================
 # BATCH CORRECTION MODULE
 # Description: Wrapper functions for cyCombine execution.
-# Dependencies: cyCombine, SingleCellExperiment, magrittr, dplyr
+# Dependencies: cyCombine, SingleCellExperiment, magrittr, dplyr, tibble
 # ==============================================================================
 
 library(cyCombine)
 library(SingleCellExperiment)
 library(magrittr)
 library(dplyr)
+library(tibble)
 
 #' @title Run cyCombine Batch Correction
 #' @description Performs EMD-based batch correction using cyCombine.
@@ -27,74 +28,67 @@ run_batch_correction <- function(sce, markers, batch_col = "batch", config) {
   
   message("[Correction] Preparing data for cyCombine...")
   
-  # cyCombine expects a tibble with columns: markers + batch_col + sample_col
-  # We extract data efficiently
-  exprs_t <- t(assay(sce, "exprs"))
-  meta    <- colData(sce) %>% as.data.frame()
+  # Prepare Input Tibble
+  # CRITICAL: Use check.names = FALSE to prevent R from renaming "CD4+" to "CD4."
+  # This prevents mismatch errors downstream.
+  input_df <- tryCatch({
+    exprs_t <- t(assay(sce, "exprs"))
+    meta    <- colData(sce) %>% as.data.frame()
+    
+    # Efficiently combine matrix and metadata without mangling column names
+    dplyr::bind_cols(as.data.frame(exprs_t, check.names = FALSE), meta) %>%
+      as_tibble()
+  }, error = function(e) {
+    stop(sprintf("[Correction Fatal] Data preparation failed: %s", e$message))
+  })
   
-  # Bind expression and metadata
-  # Optimization: Use indices to avoid full data duplication if possible, 
-  # but cyCombine needs a specific structure.
-  input_df <- cbind(as.data.frame(exprs_t), meta) %>%
-    as_tibble()
+  # Pre-Flight Check: Verify markers exist in the tibble columns
+  # This catches "CD4+" vs "CD4." issues before calling the library
+  missing_cols <- setdiff(markers, colnames(input_df))
+  if (length(missing_cols) > 0) {
+    stop(sprintf("[Correction Fatal] Column mismatch! Markers not found in input_df: %s", 
+                 paste(missing_cols, collapse=", ")))
+  }
   
-  # 2. Normalization & SOM Training (Learn the distribution shapes)
-  message(sprintf("[Correction] Training SOM grid (%dx%d) with rlen=%d...", 
+  # 2. Execute Batch Correction
+  # FIXED: 
+  # - Passed 'input_df' as the FIRST POSITIONAL argument (no name) to avoid "unused argument" errors.
+  # - Removed 'sample_col' (not required/supported by this wrapper).
+  message(sprintf("[Correction] Running cyCombine::batch_correct (Grid: %dx%d, Rlen: %d)...", 
                   config$xdim, config$ydim, config$rlen))
   
-  # Determine cofactor for denormalization if needed (usually 5 for cytof/flow)
-  # Note: Since input is already asinh transformed, cyCombine uses it directly 
-  # for determining anchors.
-  
-  labels <- tryCatch({
-    cyCombine::prepare_data(
-      data = input_df,
+  corrected_df <- tryCatch({
+    cyCombine::batch_correct(
+      input_df,                   # Positional argument (safest for API variations)
       markers = markers,
       covar = batch_col,
-      sample_col = "sample_id", 
       norm_method = config$norm_method,
       xdim = config$xdim,
       ydim = config$ydim,
       rlen = config$rlen,
-      seed = config$seed # Ensure reproducibility
+      seed = config$seed
     )
   }, error = function(e) {
-    stop(sprintf("[Correction Fatal] SOM Training failed: %s", e$message))
+    stop(sprintf("[Correction Fatal] cyCombine execution failed: %s", e$message))
   })
   
-  # 3. Apply Correction (EMD Matching)
-  message("[Correction] Applying EMD correction...")
-  
-  corrected_df <- tryCatch({
-    cyCombine::correct_data(
-      data = input_df,
-      label = labels,
-      markers = markers,
-      covar = batch_col,
-      sample_col = "sample_id",
-      prop = 0.1 # Default subsampling for EMD computation
-    )
-  }, error = function(e) {
-    stop(sprintf("[Correction Fatal] EMD Correction failed: %s", e$message))
-  })
-  
-  # 4. Reconstruct SingleCellExperiment
-  # The output of correct_data is a tibble. We need to put it back into SCE.
+  # 3. Reconstruct SingleCellExperiment
   message("[Correction] Rebuilding SingleCellExperiment object...")
   
-  # Ensure order matches (cyCombine usually maintains order, but we verify dimensions)
+  # Validation: Ensure row count integrity
   if (nrow(corrected_df) != ncol(sce)) {
-    warning("[Correction Warning] Row count mismatch after correction. Checking alignment.")
+    stop(sprintf("[Correction Fatal] Output rows (%d) do not match input cells (%d).", 
+                 nrow(corrected_df), ncol(sce)))
   }
   
-  # Extract corrected expression
+  # Extract corrected expression matrix
+  # We select only the markers to avoid duplicating metadata
   corrected_exprs <- corrected_df %>%
     select(all_of(markers)) %>%
     as.matrix() %>%
     t()
   
-  # Create new SCE
-  # We keep the original metadata
+  # Create new SCE retaining original metadata
   sce_corr <- SingleCellExperiment(
     assays = list(exprs = corrected_exprs),
     colData = colData(sce)
