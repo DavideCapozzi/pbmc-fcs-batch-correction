@@ -38,3 +38,14 @@ markers:
     - "SSC-W"
     - "Width"
     - "Cell_length"
+
+# ## Installation
+
+# 1. Create the environment:
+#    ```bash
+#    micromamba create -f env/environment.yml
+#    micromamba activate pbmc-fcs-batch-correction
+# Install custom packages:
+
+# Bash
+# Rscript -e "remotes::install_github('biosurf/cyCombine', upgrade = 'never')"

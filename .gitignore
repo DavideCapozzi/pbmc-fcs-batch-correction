@@ -51,6 +51,7 @@ rsconnect/
 #############################################
 # Custom added
 
+*.fcs
+*.rds
 data/
-
-
+results/

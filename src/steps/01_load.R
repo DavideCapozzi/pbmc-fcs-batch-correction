@@ -12,7 +12,7 @@ suppressPackageStartupMessages({
   library(tidyverse)
   library(flowCore)
   library(SingleCellExperiment)
-  library(cyCombine) # Validates installation immediately
+  library(cyCombine) 
 })
 
 # Load local functions
