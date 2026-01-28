@@ -1,0 +1,40 @@
+# ==============================================================================
+# CONFIGURATION: PBMC BATCH CORRECTION
+# ==============================================================================
+
+project_id: "PBMC_105_Correction"
+random_seed: 42
+n_cores: 4
+
+# Directory Structure
+directories:
+  raw: "data/01_raw"
+  intermediate: "data/02_intermediate"
+  processed: "data/03_processed"
+  logs: "results/logs"
+  figures: "results/figures"
+
+# Batch Detection Patterns (Regex)
+# Files matching these patterns will be assigned the corresponding batch ID
+batches:
+  pattern_1: "Duraclone"
+  pattern_2: "Chiara"
+
+# Marker Configuration
+markers:
+  # Transformation cofactor (Arcsinh: asinh(x / cofactor))
+  transform_cofactor: 5
+
+  # Technical channels to strictly exclude from the shared marker intersection
+  # These are not biological markers and should not be used for clustering/correction
+  exclude_channels:
+    - "Time"
+    - "Event_length"
+    - "FSC-A"
+    - "FSC-H"
+    - "FSC-W"
+    - "SSC-A"
+    - "SSC-H"
+    - "SSC-W"
+    - "Width"
+    - "Cell_length"
