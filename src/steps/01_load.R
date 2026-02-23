@@ -39,6 +39,16 @@ if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 # ------------------------------------------------------------------------------
 message(sprintf("[Config] Transformation cofactor: %s", config$markers$transform_cofactor))
 
+# Sanity Check for FACS methodology
+if (!is.na(cofactor_val) && cofactor_val < 10) {
+  message("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+  message("[QC WARNING] Cofactor is set to < 10 (Current: ", cofactor_val, ").")
+  message("             This is typical for Mass Cytometry (CyTOF).")
+  message("             For standard FACS, consider using 150 to avoid")
+  message("             artificial 'peak splitting' of negative populations.")
+  message("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+}
+
 tryCatch({
   
   # Check test mode defaults to avoid null errors

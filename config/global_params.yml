@@ -35,7 +35,7 @@ testing:
 # Marker Configuration
 markers:
   # Transformation cofactor (Arcsinh: asinh(x / cofactor))
-  transform_cofactor: 5
+  transform_cofactor: 150
 
   # Technical channels to strictly exclude from the shared marker intersection
   # These are not biological markers and should not be used for clustering/correction

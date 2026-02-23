@@ -154,19 +154,27 @@ read_and_prep_data <- function(data_dirs, cofactor = 5, exclude = NULL, test_mod
   message(sprintf("[IO] Importing data using %d shared markers...", length(shared_markers)))
   message(sprintf("    -> Markers: %s...", paste(head(shared_markers, 5), collapse=", ")))
   
-  # 3. Iterative Loading
+  # 3. Iterative Loading with Detailed Logging
+  message("[IO] Starting file-by-file ingestion:")
+  
   data_list <- lapply(seq_along(fcs_files), function(i) {
     f <- fcs_files[i]
     b_id <- all_files_df$batch_id[i]
-    if (i %% 5 == 0) message(sprintf("    -> Processing file %d/%d...", i, length(fcs_files)))
     
     df <- read_single_fcs(f, shared_markers, cofactor)
     
-    if (is.null(df)) return(NULL)
+    if (is.null(df)) {
+      message(sprintf("    -> [%d/%d] FAILED: %s (Batch: %s)", i, length(fcs_files), basename(f), b_id))
+      return(NULL)
+    }
+    
+    # Detailed success logging
+    message(sprintf("    -> [%d/%d] SUCCESS: %s | Batch: %s | Events: %d", 
+                    i, length(fcs_files), basename(f), b_id, nrow(df)))
     
     # Attach Metadata
     df$sample_id <- basename(f)
-    df$batch     <- b_id # Folder name is now the batch directly
+    df$batch     <- b_id 
     
     return(df)
   })
@@ -176,6 +184,7 @@ read_and_prep_data <- function(data_dirs, cofactor = 5, exclude = NULL, test_mod
   
   if (length(data_list) == 0) stop("[IO Fatal] All files failed to import.")
   
+  message("[IO] Aggregating final dataset...")
   full_data <- dplyr::bind_rows(data_list)
   
   return(as_tibble(full_data))
