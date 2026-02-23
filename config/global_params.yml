@@ -20,18 +20,17 @@ n_cores: 4
 
 # Directory Structure
 directories:
-
-  raw: "data/01_raw"
-  intermediate: "data/02_intermediate"
-  processed: "data/03_processed"
-  logs: "results/logs"
+  raw:
+    altro_pannello: "/mnt/h/Drive condivisi/MATERIALE LABORATORIO/FILE FCS/DAVIDE/altro_pannello"
+    duraclone: "/mnt/h/Drive condivisi/MATERIALE LABORATORIO/FILE FCS/DAVIDE/duraclone"
+  intermediate: "results/intermediate"
+  processed: "results/processed"
   figures: "results/figures"
+  logs: "results/logs"
 
-# Batch Detection Patterns (Regex)
-# Files matching these patterns will be assigned the corresponding batch ID
-batches:
-  pattern_1: "Duraclone"
-  pattern_2: "Chiara"
+testing:
+  enabled: true
+  max_files_per_panel: 5
 
 # Marker Configuration
 markers:

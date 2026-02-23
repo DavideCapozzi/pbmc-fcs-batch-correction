@@ -10,19 +10,6 @@ library(dplyr)
 library(stringr)
 
 # ------------------------------------------------------------------------------
-# Helper: Determine Batch ID from Filename
-# ------------------------------------------------------------------------------
-get_batch_id <- function(filename, patterns) {
-  fname <- basename(filename)
-  for (lbl in names(patterns)) {
-    if (grepl(patterns[[lbl]], fname, ignore.case = TRUE)) {
-      return(patterns[[lbl]])
-    }
-  }
-  return("Unknown")
-}
-
-# ------------------------------------------------------------------------------
 # Helper: Detect Shared Markers from Headers
 # ------------------------------------------------------------------------------
 #' @title Detect Shared Markers
@@ -125,17 +112,41 @@ read_single_fcs <- function(file_path, markers_to_keep, cofactor = 5) {
 # Main: Batch Load Directory
 # ------------------------------------------------------------------------------
 #' @title Read and Prepare All FCS Data
-#' @description Orchestrates the loading of a directory of FCS files.
-#' @param data_dir Path to raw data.
-#' @param patterns Named list for batch detection.
+#' @description Orchestrates the loading of specific FCS directories. The directory name becomes the batch ID.
+#' @param data_dirs Named list of paths to raw data (Name = Folder/Batch ID).
 #' @param cofactor Transformation cofactor.
 #' @param exclude List of markers to exclude.
+#' @param test_mode Boolean to limit file ingestion.
+#' @param test_limit Integer, max files per directory if test_mode is TRUE.
 #' @return A tibble with concatenated data.
-read_and_prep_data <- function(data_dir, patterns, cofactor = 5, exclude = NULL) {
+read_and_prep_data <- function(data_dirs, cofactor = 5, exclude = NULL, test_mode = FALSE, test_limit = 5) {
   
-  # 1. File Discovery
-  fcs_files <- list.files(data_dir, pattern = "\\.fcs$", full.names = TRUE, recursive = TRUE)
-  if (length(fcs_files) == 0) stop("[IO Fatal] No FCS files found.")
+  # 1. File Discovery per Directory (Directory Name = Batch)
+  all_files_df <- data.frame(file_path = character(), batch_id = character(), stringsAsFactors = FALSE)
+  
+  for (dir_name in names(data_dirs)) {
+    dir_path <- data_dirs[[dir_name]]
+    
+    # Force recursive = FALSE to process only top-level files
+    files_in_dir <- list.files(dir_path, pattern = "\\.fcs$", full.names = TRUE, recursive = FALSE)
+    
+    if (length(files_in_dir) == 0) {
+      warning(sprintf("[IO Warning] No FCS files found in %s", dir_path))
+      next
+    }
+    
+    # Subsampling for test mode
+    if (test_mode) {
+      files_in_dir <- head(files_in_dir, test_limit)
+      message(sprintf("[IO Test Mode] Taking first %d files from batch/folder: %s", length(files_in_dir), dir_name))
+    }
+    
+    temp_df <- data.frame(file_path = files_in_dir, batch_id = dir_name, stringsAsFactors = FALSE)
+    all_files_df <- rbind(all_files_df, temp_df)
+  }
+  
+  fcs_files <- all_files_df$file_path
+  if (length(fcs_files) == 0) stop("[IO Fatal] No FCS files found across all provided directories.")
   
   # 2. Dynamic Marker Detection
   shared_markers <- detect_shared_markers(fcs_files, exclude)
@@ -146,7 +157,8 @@ read_and_prep_data <- function(data_dir, patterns, cofactor = 5, exclude = NULL)
   # 3. Iterative Loading
   data_list <- lapply(seq_along(fcs_files), function(i) {
     f <- fcs_files[i]
-    if (i %% 10 == 0) message(sprintf("    -> Processing file %d/%d...", i, length(fcs_files)))
+    b_id <- all_files_df$batch_id[i]
+    if (i %% 5 == 0) message(sprintf("    -> Processing file %d/%d...", i, length(fcs_files)))
     
     df <- read_single_fcs(f, shared_markers, cofactor)
     
@@ -154,7 +166,7 @@ read_and_prep_data <- function(data_dir, patterns, cofactor = 5, exclude = NULL)
     
     # Attach Metadata
     df$sample_id <- basename(f)
-    df$batch     <- get_batch_id(f, patterns)
+    df$batch     <- b_id # Folder name is now the batch directly
     
     return(df)
   })
@@ -165,12 +177,6 @@ read_and_prep_data <- function(data_dir, patterns, cofactor = 5, exclude = NULL)
   if (length(data_list) == 0) stop("[IO Fatal] All files failed to import.")
   
   full_data <- dplyr::bind_rows(data_list)
-  
-  # Final Integrity Check
-  if (any(full_data$batch == "Unknown")) {
-    n_unk <- sum(full_data$batch == "Unknown")
-    warning(sprintf("[IO Warning] %d cells detected with 'Unknown' batch ID.", n_unk))
-  }
   
   return(as_tibble(full_data))
 }

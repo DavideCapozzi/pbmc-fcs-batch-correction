@@ -68,9 +68,10 @@ tryCatch({
     warning("[QC Warning] 'metacluster_id' not found in SCE. Skipping cluster plot.")
   }
   
-  # 6. Save Updated SCE (Optional: if you want to keep the UMAP coords for later)
-  # For now, we usually don't overwrite the Step 3 file unless explicitly desired.
-  # We just output the figures.
+  # 6. Save Updated SCE 
+  out_file_sce <- file.path(config$directories$processed, "dimred_sce.rds")
+  message(sprintf("[IO] Saving dimensionally reduced data to %s", out_file_sce))
+  saveRDS(sce, out_file_sce)
   
   message("=== STEP 4 COMPLETE ===\n")
   

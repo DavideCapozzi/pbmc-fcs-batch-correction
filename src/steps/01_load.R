@@ -29,8 +29,10 @@ config <- read_yaml(config_path)
 raw_dir  <- config$directories$raw
 out_dir  <- config$directories$intermediate
 
-# Verify Input Directory
-if (!dir.exists(raw_dir)) stop("[Fatal] Raw data directory not found: ", raw_dir)
+# Verify Input Directories
+for (folder_name in names(raw_dir)) {
+  if (!dir.exists(raw_dir[[folder_name]])) stop("[Fatal] Raw data directory not found for: ", folder_name)
+}
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 
 # 2. Execution
@@ -39,12 +41,17 @@ message(sprintf("[Config] Transformation cofactor: %s", config$markers$transform
 
 tryCatch({
   
+  # Check test mode defaults to avoid null errors
+  is_test <- if (!is.null(config$testing$enabled)) config$testing$enabled else FALSE
+  test_lim <- if (!is.null(config$testing$max_files_per_panel)) config$testing$max_files_per_panel else 5
+  
   # Orchestrate Data Loading (Dynamic Marker Detection internal)
   uncorrected_tbl <- read_and_prep_data(
-    data_dir = raw_dir,
-    patterns = config$batches,
+    data_dirs = raw_dir,
     cofactor = config$markers$transform_cofactor,
-    exclude  = config$markers$exclude_channels
+    exclude  = config$markers$exclude_channels,
+    test_mode = is_test,
+    test_limit = test_lim
   )
   
   # 3. Quality Check (Basic)
@@ -53,20 +60,16 @@ tryCatch({
   
   # Check Batch Distribution
   batch_counts <- table(uncorrected_tbl$batch)
-  message("    -> Cell counts per batch:")
+  message("    -> Cell counts per batch (folder):")
   print(batch_counts)
   
   # Check Dimensions
   n_cells <- nrow(uncorrected_tbl)
   n_markers <- ncol(uncorrected_tbl) - 2 # excluding sample_id and batch
   message(sprintf("    -> Total Dimensions: %d cells x %d biological markers", n_cells, n_markers))
-
-  if (any(names(batch_counts) == "Unknown")) {
-    stop("[Fatal] 'Unknown' batches detected. Please check filename patterns in config.")
-  }
-
+  
   if (n_markers < 3) {
-    stop("[Fatal] Too few markers detected. Check 'exclude_channels' in config.")
+    stop("[Fatal] Too few shared markers detected between folders. Check 'exclude_channels' in config.")
   }
 
   # 4. Save Artifacts
