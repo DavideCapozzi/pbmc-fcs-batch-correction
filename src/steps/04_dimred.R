@@ -58,14 +58,23 @@ tryCatch({
   message(sprintf("[Output] Saving plots to: %s", out_dir))
   
   # Plot by Batch (Technical Check)
-  plot_umap(sce, "batch", file.path(out_dir, "umap_batch.png"))
+  plot_umap(sce, "batch", file.path(out_dir, "umap_batch.pdf"))
   
   # Plot by Metacluster (Biological Check)
   # Check if metacluster_id exists (it should from Step 3)
   if ("metacluster_id" %in% names(colData(sce))) {
-    plot_umap(sce, "metacluster_id", file.path(out_dir, "umap_clusters.png"))
+    plot_umap(sce, "metacluster_id", file.path(out_dir, "umap_clusters.pdf"))
+    
+    # NEW: Plot Metaclusters split by Batch to assess integration quality
+    plot_umap_split(
+      sce = sce, 
+      color_by = "metacluster_id", 
+      split_by = "batch", 
+      out_path = file.path(out_dir, "umap_clusters_split_by_batch.pdf")
+    )
+    
   } else {
-    warning("[QC Warning] 'metacluster_id' not found in SCE. Skipping cluster plot.")
+    warning("[QC Warning] 'metacluster_id' not found in SCE. Skipping cluster plots.")
   }
   
   # 6. Save Updated SCE 

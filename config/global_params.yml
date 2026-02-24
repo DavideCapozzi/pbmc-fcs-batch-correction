@@ -21,7 +21,7 @@ n_cores: 4
 # Directory Structure
 directories:
   raw:
-    altro_pannello: "/mnt/h/Drive condivisi/MATERIALE LABORATORIO/FILE FCS/DAVIDE/altro_pannello"
+    pannelli_liquidi: "/mnt/h/Drive condivisi/MATERIALE LABORATORIO/FILE FCS/DAVIDE/pannelli_liquidi"
     duraclone: "/mnt/h/Drive condivisi/MATERIALE LABORATORIO/FILE FCS/DAVIDE/duraclone"
   intermediate: "results/intermediate"
   processed: "results/processed"
@@ -61,3 +61,5 @@ dimred:
   n_neighbors: 15
   min_dist: 0.1
   seed: 1234
+
+EOF: TRUE

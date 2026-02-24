@@ -69,3 +69,23 @@ plot_umap <- function(sce, color_by, out_path) {
   
   ggplot2::ggsave(out_path, plot = p, width = 8, height = 6)
 }
+
+#' @title Plot UMAP Split by Variable
+#' @description Generates a static UMAP plot colored by a variable and faceted by another.
+#' @param sce SCE object with UMAP computed.
+#' @param color_by String, column name in colData to color by (e.g., "metacluster_id").
+#' @param split_by String, column name in colData to facet by (e.g., "batch").
+#' @param out_path String, path to save the PDF.
+plot_umap_split <- function(sce, color_by, split_by, out_path) {
+  
+  message(sprintf("[DimRed] Plotting UMAP colored by %s and split by %s...", color_by, split_by))
+  
+  # 'other_fields' is strictly required to pass the split variable to the internal plotting dataframe
+  p <- scater::plotReducedDim(sce, dimred = "UMAP", colour_by = color_by, other_fields = split_by) +
+    ggplot2::theme_minimal() +
+    ggplot2::facet_wrap(as.formula(paste("~", split_by))) +
+    ggplot2::ggtitle(paste("UMAP colored by", color_by, "split by", split_by))
+  
+  # Width is extended to 12 to accommodate multiple panels side-by-side without squishing
+  ggplot2::ggsave(out_path, plot = p, width = 12, height = 6)
+}

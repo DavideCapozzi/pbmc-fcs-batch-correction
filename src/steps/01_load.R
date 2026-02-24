@@ -67,7 +67,7 @@ tryCatch({
     test_limit = test_lim
   )
   
-  # 3. Quality Check (Basic)
+  # 3. Quality Check 
   # ----------------------------------------------------------------------------
   message("[QC] Performing basic integrity checks...")
   
@@ -75,6 +75,13 @@ tryCatch({
   batch_counts <- table(uncorrected_tbl$batch)
   message("    -> Cell counts per batch (folder):")
   print(batch_counts)
+  
+  # Print Specific Samples Processed per Batch
+  message("    -> Samples successfully mapped per batch:")
+  for (b in unique(uncorrected_tbl$batch)) {
+    samples_in_batch <- unique(uncorrected_tbl$sample_id[uncorrected_tbl$batch == b])
+    message(sprintf("       [Batch: %s] -> %s", b, paste(samples_in_batch, collapse = ", ")))
+  }
   
   # Check Dimensions
   n_cells <- nrow(uncorrected_tbl)
