@@ -30,7 +30,7 @@ directories:
 
 testing:
   enabled: true
-  max_files_per_panel: 5
+  max_files_per_panel: 3
 
 # Marker Configuration
 markers:
@@ -50,6 +50,7 @@ markers:
     - "SSC-W"
     - "Width"
     - "Cell_length"
+    
 clustering:
   xdim: 10              
   ydim: 10

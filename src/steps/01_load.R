@@ -37,7 +37,10 @@ if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 
 # 2. Execution
 # ------------------------------------------------------------------------------
-message(sprintf("[Config] Transformation cofactor: %s", config$markers$transform_cofactor))
+
+cofactor_val <- config$markers$transform_cofactor
+  
+message(sprintf("[Config] Transformation cofactor: %s", cofactor_val))
 
 # Sanity Check for FACS methodology
 if (!is.na(cofactor_val) && cofactor_val < 10) {
