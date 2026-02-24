@@ -154,17 +154,18 @@ read_and_prep_data <- function(data_dirs, cofactor = 5, exclude = NULL, test_mod
   message(sprintf("[IO] Importing data using %d shared markers...", length(shared_markers)))
   message(sprintf("    -> Markers: %s...", paste(head(shared_markers, 5), collapse=", ")))
   
-  # 3. Iterative Loading with Detailed Logging
-  message("[IO] Starting file-by-file ingestion:")
-  
+  # 3. Iterative Loading
   data_list <- lapply(seq_along(fcs_files), function(i) {
     f <- fcs_files[i]
     b_id <- all_files_df$batch_id[i]
     
+    # NEW: Explicitly print the loaded sample as requested
+    message(sprintf("    -> Loaded sample: %s (Batch: %s)", basename(f), b_id))
+    
     df <- read_single_fcs(f, shared_markers, cofactor)
     
     if (is.null(df)) {
-      message(sprintf("    -> [%d/%d] FAILED: %s (Batch: %s)", i, length(fcs_files), basename(f), b_id))
+      message(sprintf("       [!] Failed to load: %s", basename(f)))
       return(NULL)
     }
     

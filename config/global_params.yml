@@ -51,10 +51,17 @@ markers:
     - "Width"
     - "Cell_length"
     
+correction:
+  xdim: 8
+  ydim: 8
+  rlen: 10
+  norm_method: "scale"
+  seed: 1234
+    
 clustering:
   xdim: 10              
   ydim: 10
-  n_metaclusters: 20    
+  n_metaclusters: 20
   seed: 1234
 
 dimred:
