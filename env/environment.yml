@@ -4,16 +4,51 @@ channels:
   - bioconda
   - nodefaults
 dependencies:
-  - r-base
+  - python=3.12
+  - r-base=4.4
+  
+  # Core Build Tools
+  - compilers
+  - make
+  - pkg-config
+  
+  # System Libraries & Security Certificates
+  - ca-certificates
+  - openssl
+  - libxml2
+  - libcurl
+  - icu
+  - libpng
+  - xorg-libx11
+  
+  # R Infrastructure
   - r-tidyverse
   - r-devtools
   - r-biocmanager
+  - r-pak
+  - r-remotes
+  
+  # Pre-compiled Bioconductor Dependencies
+  - bioconductor-singlecellexperiment
+  - bioconductor-summarizedexperiment
+  - bioconductor-biobase
   - bioconductor-flowcore
   - bioconductor-flowsom
-  - bioconductor-scater
-  - bioconductor-singlecellexperiment
+  - bioconductor-sva
+  - bioconductor-limma
   - bioconductor-complexheatmap
-  - r-yaml
-  - r-r.utils
-  - r-ggridges
-  - r-cowplot
+  - bioconductor-genomeinfodbdata
+  - bioconductor-rtracklayer
+  - bioconductor-zlibbioc
+  
+  # R CRAN Dependencies as Binaries
+  - r-kohonen
+  - r-data.table
+  - r-matrix
+  - r-rcpp
+  - r-rcpparmadillo
+  - r-stringi
+  - r-xml2
+  - r-curl
+  - r-png
+  - r-writexl

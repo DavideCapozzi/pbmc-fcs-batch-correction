@@ -88,6 +88,9 @@ tryCatch({
   # --- STEP 2: BATCH CORRECTION ---
   run_pipeline_step("src/steps/02_correct.R")
   
+  # --- STEP 2b: CORRECTION EVALUATION ---
+  run_pipeline_step("src/steps/02b_evaluate.R")
+  
   # --- STEP 3: CLUSTERING ---
   run_pipeline_step("src/steps/03_cluster.R")
   
