@@ -52,10 +52,10 @@ markers:
     - "Cell_length"
     
 correction:
-  xdim: 8
-  ydim: 8
-  rlen: 10
-  norm_method: "scale"
+  xdim: 10
+  ydim: 10
+  rlen: 30
+  norm_method: "rank"
   seed: 1234
     
 clustering:
