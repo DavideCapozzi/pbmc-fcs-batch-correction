@@ -82,7 +82,10 @@ sink(con, type = "message")  # Capture Messages/Warnings (IMPORTANT for RStudio)
 # Use tryCatch to ensure sink() is closed even if the pipeline crashes
 tryCatch({
 
-  # --- STEP 1: LOAD & TRANSFORM ---
+  # --- STEP 2: QC FILTERING (runs before load; produces cell filters for Step 01) ---
+  run_pipeline_step("src/steps/02_qc.R")
+
+  # --- STEP 1: LOAD & TRANSFORM (applies QC filters if present) ---
   run_pipeline_step("src/steps/01_load.R")
 
   # --- CONDITIONAL BRANCH: MFI CORRECTION vs. FREQUENCY INTEGRATION ---
@@ -121,8 +124,8 @@ tryCatch({
     }
   }
 
-  # --- DIMRED: UMAP VISUALIZATION (BOTH PATHS) ---
-  run_pipeline_step("src/steps/04_dimred.R")
+  # --- STEP 8: DIMRED: UMAP VISUALIZATION (BOTH PATHS) ---
+  run_pipeline_step("src/steps/08_dimred.R")
 
   # Final Success Message
   cat("\n==================================================\n")

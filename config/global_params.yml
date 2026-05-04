@@ -40,6 +40,27 @@ markers:
     - "Width"
     - "Cell_length"
     
+qc:
+  enabled: true
+
+  peacoqc:
+    remove_margins: true
+    use_IQR_outlier_detection: true
+    IQR_multiplier: 1.5
+    min_cells: 150
+
+  singlet:
+    enabled: true
+    slope_sd_multiplier: 3
+
+  debris:
+    enabled: true
+    fsc_min_quantile: 0.02
+    ssc_max_quantile: 0.98
+
+  max_pct_removed: 85
+  min_cells_final: 5000
+
 correction:
   xdim: 10
   ydim: 10

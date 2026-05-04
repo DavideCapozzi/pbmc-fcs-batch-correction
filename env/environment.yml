@@ -4,8 +4,8 @@ channels:
   - bioconda
   - nodefaults
 dependencies:
-  - python=3.12
-  - r-base=4.4
+  - python=3.11
+  - r-base=4.3.3
   
   # Core Build Tools
   - compilers
@@ -33,6 +33,8 @@ dependencies:
   - bioconductor-summarizedexperiment
   - bioconductor-biobase
   - bioconductor-flowcore
+  - bioconductor-peacoqc
+  - bioconductor-flowdensity
   - bioconductor-flowsom
   - bioconductor-sva
   - bioconductor-limma

@@ -2,13 +2,10 @@
 # src/steps/06_evaluate_integration.R
 # ==============================================================================
 # STEP 06: INTEGRATION VALIDATION — INTRA-BATCH STABILITY METRICS
-# Description: Validates the stratified ecological baseline with two metrics:
-#   (1) JSD between matched cluster centroid profiles — validates centroid
-#       matching quality from Step 03.
-#   (2) Intra-Batch Coefficient of Variation (CV = SD / Mean) — flags
-#       populations with extreme within-batch frequency variability, indicating
-#       reference intervals that may be unreliable for patient Z-scoring.
-# Dependencies: writexl, yaml, dplyr
+# (1) JSD between matched cluster centroid profiles — validates matching quality.
+# (2) Intra-Batch CV (SD/Mean) — flags populations with high within-batch
+#     frequency variability that would produce unreliable Z-score baselines.
+# Output: integration_validation_report.xlsx (ClusterMatch + IntraBatchStability)
 # ==============================================================================
 
 suppressPackageStartupMessages({
@@ -18,6 +15,7 @@ suppressPackageStartupMessages({
 })
 
 source("src/functions/cluster_matching.R")
+source("src/functions/step_logger.R")
 
 message("\n=== PIPELINE STEP 6: INTEGRATION VALIDATION ===")
 
@@ -37,6 +35,12 @@ if (length(missing) > 0) {
        ". Run Steps 03-05 first.")
 }
 
+log_obj <- init_step_log(
+  step_name   = "06_evaluate_integration",
+  step_number = 6L,
+  input_files = unname(required_files)
+)
+
 tryCatch({
 
   baseline_dict  <- readRDS(required_files["baseline_file"])
@@ -46,24 +50,20 @@ tryCatch({
   batches <- names(centroids_list)
   markers <- colnames(centroids_list[[batches[1L]]])
 
-  # --------------------------------------------------------------------------
-  # METRIC 1: JSD between matched cluster centroid profiles
-  # --------------------------------------------------------------------------
+  # Metric 1: JSD per matched pair
   message("[Step 06] Computing Jensen-Shannon Divergence per matched pair...")
-  validation <- validate_cluster_matches(match_table, centroids_list, markers)
-
+  validation           <- validate_cluster_matches(match_table, centroids_list, markers)
   cluster_match_report <- validation$summary
+
+  n_jsd_pass <- 0L
   if (nrow(cluster_match_report) > 0) {
-    n_pass <- sum(cluster_match_report$jsd_pass, na.rm = TRUE)
+    n_jsd_pass <- sum(cluster_match_report$jsd_pass, na.rm = TRUE)
     message(sprintf("[Step 06] JSD < 0.1: %d / %d matched populations",
-                    n_pass, nrow(cluster_match_report)))
+                    n_jsd_pass, nrow(cluster_match_report)))
   }
 
-  # --------------------------------------------------------------------------
-  # METRIC 2: Intra-Batch Coefficient of Variation (CV)
-  # --------------------------------------------------------------------------
-  message("[Step 06] Computing intra-batch stability (CV per population per batch)...")
-
+  # Metric 2: Intra-batch CV
+  message("[Step 06] Computing intra-batch CV per (batch, population)...")
   cv_threshold <- as.numeric(config$integration$cv_flag_threshold %||% 1.5)
 
   cv_table         <- baseline_dict
@@ -72,15 +72,16 @@ tryCatch({
 
   zero_mean_n <- sum(!is.finite(cv_table$cv), na.rm = TRUE)
   if (zero_mean_n > 0) {
-    message(sprintf("[Step 06] %d strata with mean_freq = 0 (CV undefined): excluded from CV flagging.",
+    message(sprintf("[Step 06] %d strata with mean_freq = 0 (CV undefined): excluded.",
                     zero_mean_n))
   }
-  cv_table$cv[!is.finite(cv_table$cv)]  <- NA_real_
-  cv_table$cv_flag[is.na(cv_table$cv)]  <- NA
+  cv_table$cv[!is.finite(cv_table$cv)] <- NA_real_
+  cv_table$cv_flag[is.na(cv_table$cv)] <- NA
 
   n_flagged <- sum(cv_table$cv_flag, na.rm = TRUE)
-  message(sprintf("[Step 06] Strata with CV > %.1f (high intra-batch variability): %d / %d",
+  message(sprintf("[Step 06] Strata with CV > %.1f: %d / %d",
                   cv_threshold, n_flagged, sum(!is.na(cv_table$cv_flag))))
+
   if (n_flagged > 0) {
     flagged_ids <- cv_table[!is.na(cv_table$cv_flag) & cv_table$cv_flag,
                              c("batch", "population", "cv")]
@@ -90,24 +91,27 @@ tryCatch({
     }
   }
 
-  # --------------------------------------------------------------------------
-  # EXPORT
-  # --------------------------------------------------------------------------
+  out_xlsx <- file.path(int_out_dir, "integration_validation_report.xlsx")
   writexl::write_xlsx(
-    list(
-      ClusterMatch        = cluster_match_report,
-      IntraBatchStability = cv_table
-    ),
-    path = file.path(int_out_dir, "integration_validation_report.xlsx")
+    list(ClusterMatch = cluster_match_report, IntraBatchStability = cv_table),
+    path = out_xlsx
   )
+  message(sprintf("[Step 06] Validation report saved: %s", out_xlsx))
 
-  message(sprintf("[Step 06] Validation report saved to: %s",
-                  file.path(int_out_dir, "integration_validation_report.xlsx")))
+  add_metric(log_obj, "n_matched_pairs", nrow(cluster_match_report))
+  add_metric(log_obj, "n_jsd_pass",      n_jsd_pass)
+  add_metric(log_obj, "n_cv_flagged",    n_flagged)
+  add_metric(log_obj, "cv_threshold",    cv_threshold)
+
+  finalize_step_log(log_obj, output_files = out_xlsx, status = "SUCCESS")
+  write_step_json(log_obj, config$directories$logs)
 
   message("\n=== STEP 6 COMPLETE ===\n")
 
 }, error = function(e) {
-  message("\n[Error] Step 06 failed:")
-  message(e$message)
+  add_metric(log_obj, "error_message", e$message)
+  finalize_step_log(log_obj, output_files = character(0L), status = "FAILURE")
+  write_step_json(log_obj, config$directories$logs)
+  message("\n[Error] Step 06 failed: ", e$message)
   stop(paste("[Step 06 Fatal]", e$message), call. = FALSE)
 })
