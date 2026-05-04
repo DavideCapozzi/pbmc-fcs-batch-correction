@@ -92,13 +92,13 @@ tryCatch({
     message("\n[Main] clustering.run_per_batch = FALSE: running legacy MFI correction path.")
 
     # --- STEP 2: BATCH CORRECTION (LEGACY) ---
-    run_pipeline_step("src/steps/02_correct.R")
+    run_pipeline_step("src/legacy/steps/02_correct.R")
 
     # --- STEP 2b: CORRECTION EVALUATION (LEGACY) ---
-    run_pipeline_step("src/steps/02b_evaluate.R")
+    run_pipeline_step("src/legacy/steps/02b_evaluate.R")
 
     # --- STEP 3: CLUSTERING ON COMBINED CORRECTED DATA (LEGACY) ---
-    run_pipeline_step("src/steps/03_cluster.R")
+    run_pipeline_step("src/legacy/steps/03_cluster.R")
 
   } else {
     message("\n[Main] clustering.run_per_batch = TRUE: running population frequency integration path.")
@@ -109,7 +109,7 @@ tryCatch({
     # --- STEP 4: PER-SAMPLE POPULATION FREQUENCIES ---
     run_pipeline_step("src/steps/04_frequencies.R")
 
-    # --- STEP 5: DERSIMONIANLAIRD RANDOM EFFECTS INTEGRATION ---
+    # --- STEP 5: STRATIFIED ECOLOGICAL BASELINE ---
     run_pipeline_step("src/steps/05_integrate.R")
 
     # --- STEP 6: INTEGRATION VALIDATION (PEER-REVIEWER STATISTICS) ---
