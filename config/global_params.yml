@@ -27,6 +27,7 @@ directories:
   processed: "results/processed"
   figures: "results/figures"
   logs: "results/logs"
+  integration: "results/integration"
 
 testing:
   enabled: true
@@ -59,10 +60,17 @@ correction:
   seed: 1234
     
 clustering:
-  xdim: 10              
+  xdim: 10
   ydim: 10
   n_metaclusters: 20
   seed: 1234
+  run_per_batch: true
+
+integration:
+  method: "random_effects"
+  min_samples_per_batch: 3
+  similarity_threshold: 0.70
+  n_bootstrap: 1000
 
 dimred:
   n_neighbors: 15

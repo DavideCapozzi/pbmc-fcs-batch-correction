@@ -53,3 +53,5 @@ dependencies:
   - r-curl
   - r-png
   - r-writexl
+  - r-vegan
+  - r-patchwork

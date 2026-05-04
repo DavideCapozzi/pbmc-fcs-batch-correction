@@ -55,3 +55,5 @@ rsconnect/
 *.rds
 data/
 results/
+.claude
+CLAUDE.md

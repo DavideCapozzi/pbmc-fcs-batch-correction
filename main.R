@@ -81,22 +81,44 @@ sink(con, type = "message")  # Capture Messages/Warnings (IMPORTANT for RStudio)
 
 # Use tryCatch to ensure sink() is closed even if the pipeline crashes
 tryCatch({
-  
+
   # --- STEP 1: LOAD & TRANSFORM ---
   run_pipeline_step("src/steps/01_load.R")
-  
-  # --- STEP 2: BATCH CORRECTION ---
-  run_pipeline_step("src/steps/02_correct.R")
-  
-  # --- STEP 2b: CORRECTION EVALUATION ---
-  run_pipeline_step("src/steps/02b_evaluate.R")
-  
-  # --- STEP 3: CLUSTERING ---
-  run_pipeline_step("src/steps/03_cluster.R")
-  
-  # --- STEP 4: CLUSTERING ---
+
+  # --- CONDITIONAL BRANCH: MFI CORRECTION vs. FREQUENCY INTEGRATION ---
+  run_per_batch <- isTRUE(config$clustering$run_per_batch)
+
+  if (!run_per_batch) {
+    message("\n[Main] clustering.run_per_batch = FALSE: running legacy MFI correction path.")
+
+    # --- STEP 2: BATCH CORRECTION (LEGACY) ---
+    run_pipeline_step("src/steps/02_correct.R")
+
+    # --- STEP 2b: CORRECTION EVALUATION (LEGACY) ---
+    run_pipeline_step("src/steps/02b_evaluate.R")
+
+    # --- STEP 3: CLUSTERING ON COMBINED CORRECTED DATA (LEGACY) ---
+    run_pipeline_step("src/steps/03_cluster.R")
+
+  } else {
+    message("\n[Main] clustering.run_per_batch = TRUE: running population frequency integration path.")
+
+    # --- STEP 3: INDEPENDENT PER-BATCH CLUSTERING + CLUSTER MATCHING ---
+    run_pipeline_step("src/steps/03_cluster_per_batch.R")
+
+    # --- STEP 4: PER-SAMPLE POPULATION FREQUENCIES ---
+    run_pipeline_step("src/steps/04_frequencies.R")
+
+    # --- STEP 5: DERSIMONIANLAIRD RANDOM EFFECTS INTEGRATION ---
+    run_pipeline_step("src/steps/05_integrate.R")
+
+    # --- STEP 6: INTEGRATION VALIDATION (PEER-REVIEWER STATISTICS) ---
+    run_pipeline_step("src/steps/06_evaluate_integration.R")
+  }
+
+  # --- DIMRED: UMAP VISUALIZATION (BOTH PATHS) ---
   run_pipeline_step("src/steps/04_dimred.R")
-  
+
   # Final Success Message
   cat("\n==================================================\n")
   cat(sprintf("PIPELINE FINISHED SUCCESSFULLY at %s\n", Sys.time()))
