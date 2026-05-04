@@ -1,15 +1,3 @@
-
-# ## Installation
-
-# 1. Create the environment:
-#    ```bash
-#    micromamba create -f env/environment.yml
-#    micromamba activate pbmc-fcs-batch-correction
-# Install custom packages:
-
-# Bash
-# Rscript -e "remotes::install_github('biosurf/cyCombine', upgrade = 'never')"
-
 # ==============================================================================
 # CONFIGURATION: PBMC BATCH CORRECTION
 # ==============================================================================
@@ -67,34 +55,14 @@ clustering:
   run_per_batch: true
 
 integration:
+  method: "random_effects"
   min_samples_per_batch: 3
   similarity_threshold: 0.70
-  cv_flag_threshold: 1.5
-
-# Biological population annotation (optional).
-# Review the "Centroids" sheet in stratified_baseline_report.xlsx to identify
-# each population by its marker expression profile, then fill in the names.
-# When populated, a "population_name" column is added to StratifiedBaseline.
-# population_labels:
-#   pop_1:  ""
-#   pop_2:  ""
-#   pop_3:  ""
-#   pop_4:  ""
-#   pop_5:  ""
-#   pop_6:  ""
-#   pop_7:  ""
-#   pop_8:  ""
-#   pop_9:  ""
-#   pop_10: ""
-#   pop_11: ""
-#   pop_12: ""
-#   pop_13: ""
-#   pop_14: ""
-#   pop_15: ""
-#   pop_16: ""
-#   pop_17: ""
-#   pop_18: ""
-#   pop_19: ""
+  n_bootstrap: 1000
+  
+scoring:
+  run_patient_scoring: true
+  z_score_threshold: 2.0  # Clinical standard for 95% confidence interval
 
 dimred:
   n_neighbors: 15

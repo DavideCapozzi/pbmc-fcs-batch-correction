@@ -114,6 +114,11 @@ tryCatch({
 
     # --- STEP 6: INTEGRATION VALIDATION (PEER-REVIEWER STATISTICS) ---
     run_pipeline_step("src/steps/06_evaluate_integration.R")
+    
+    # --- STEP 7: CLINICAL INFERENCE (Z-SCORE) ---
+    if (!is.null(config$scoring) && isTRUE(config$scoring$run_patient_scoring)) {
+      run_pipeline_step("src/steps/07_patient_scoring.R")
+    }
   }
 
   # --- DIMRED: UMAP VISUALIZATION (BOTH PATHS) ---
