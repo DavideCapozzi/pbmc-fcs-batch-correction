@@ -28,6 +28,9 @@ markers:
 
   # Technical channels to strictly exclude from the shared marker intersection
   # These are not biological markers and should not be used for clustering/correction
+  # Viability dye — used only for dead cell gating in Step 02, never for clustering
+  viability_channel: "VIAKROME"
+
   exclude_channels:
     - "Time"
     - "Event_length"
@@ -39,24 +42,31 @@ markers:
     - "SSC-W"
     - "Width"
     - "Cell_length"
+    - "VIAKROME"
     
 qc:
   enabled: true
 
   peacoqc:
+    enabled: true
     remove_margins: true
     use_IQR_outlier_detection: true
-    IQR_multiplier: 1.5
+    IQR_multiplier: 3.5
     min_cells: 150
 
   singlet:
     enabled: true
-    slope_sd_multiplier: 3
+    slope_sd_multiplier: 2.5
 
   debris:
     enabled: true
-    fsc_min_quantile: 0.02
+    fsc_min_quantile: 0.03
     ssc_max_quantile: 0.98
+
+  viability:
+    enabled: true
+    channel: "VIAKROME"        
+    max_sd_multiplier: 2.5       
 
   max_pct_removed: 85
   min_cells_final: 5000

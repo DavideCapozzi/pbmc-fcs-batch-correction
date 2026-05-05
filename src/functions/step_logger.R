@@ -16,9 +16,13 @@ init_step_log <- function(step_name, step_number, input_files) {
   now   <- Sys.time()
   log_e <- new.env(parent = emptyenv())
 
-  log_e$step         <- as.character(step_name)
-  log_e$step_number  <- as.integer(step_number)
-  log_e$run_id       <- format(now, "%Y%m%d_%H%M%S")
+  log_e$step        <- as.character(step_name)
+  log_e$step_number <- as.integer(step_number)
+  log_e$run_id      <- if (exists("PIPELINE_RUN_ID", envir = globalenv(), inherits = FALSE)) {
+    get("PIPELINE_RUN_ID", envir = globalenv())
+  } else {
+    format(now, "%Y%m%d_%H%M%S")
+  }
   log_e$started_at   <- format(now, "%Y-%m-%dT%H:%M:%S%z")
   log_e$input_files  <- as.character(input_files)
   log_e$metrics      <- list()
@@ -59,7 +63,12 @@ finalize_step_log <- function(log_obj, output_files, status = "SUCCESS") {
 #' @param logs_dir character(1) root log directory (e.g. "results/logs")
 #' @return invisible character(1) path of the written file
 write_step_json <- function(log_obj, logs_dir) {
-  steps_dir <- file.path(logs_dir, "steps")
+  effective_logs_dir <- if (exists("PIPELINE_LOGS_DIR", envir = globalenv(), inherits = FALSE)) {
+    get("PIPELINE_LOGS_DIR", envir = globalenv())
+  } else {
+    logs_dir
+  }
+  steps_dir <- file.path(effective_logs_dir, "steps")
   if (!dir.exists(steps_dir)) dir.create(steps_dir, recursive = TRUE)
 
   fname <- sprintf("%02d_%s_%s.json",

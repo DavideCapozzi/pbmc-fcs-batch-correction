@@ -52,8 +52,16 @@ tryCatch({
   z_thresh <- as.numeric(config$scoring$z_score_threshold %||% 2.0)
   message(sprintf("[Step 07] Z-threshold: +/- %.1f", z_thresh))
 
-  scored_data     <- compute_patient_zscores(patient_freq, baseline_dict, z_threshold = z_thresh)
-  pop_labels      <- config$population_labels
+  scored_data      <- compute_patient_zscores(patient_freq, baseline_dict, z_threshold = z_thresh)
+  auto_labels_file <- file.path(out_dir, "auto_population_labels.rds")
+  pop_labels <- if (!is.null(config$population_labels) && length(config$population_labels) > 0L) {
+    config$population_labels
+  } else if (file.exists(auto_labels_file)) {
+    message("[Step 07] Loading auto-generated population labels from Step 05.")
+    readRDS(auto_labels_file)
+  } else {
+    NULL
+  }
   clinical_report <- format_clinical_report(scored_data, match_table, pop_labels)
 
   n_expanded     <- sum(clinical_report$clinical_flag == "EXPANDED",      na.rm = TRUE)

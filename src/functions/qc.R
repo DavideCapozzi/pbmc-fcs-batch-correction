@@ -4,7 +4,8 @@
 # Programmatic cell filtering before FlowSOM clustering.
 # Pipeline: PeacoQC (temporal drift + margin events) →
 #           singlet gate (FSC-H/FSC-A slope) →
-#           debris gate (FSC-A vs SSC-A window)
+#           debris gate (FSC-A vs SSC-A window) →
+#           viability gate (fluorescent dye exclusion, e.g. ViaKrome)
 #
 # All index arithmetic uses 1-based integer vectors remapped through the global
 # frame at each step, so final indices are always relative to the raw FCS file.
@@ -210,11 +211,72 @@ apply_debris_gate <- function(
 }
 
 # ------------------------------------------------------------------------------
-# 5. ORCHESTRATOR — per-sample QC pipeline
+# 5. VIABILITY GATE — dead cell exclusion via fluorescent viability dye
+# ------------------------------------------------------------------------------
+
+#' Exclude dead cells using a viability dye channel (e.g. ViaKrome, DAPI, 7-AAD).
+#' Dead cells take up the dye and show high fluorescence; the gate keeps only cells
+#' below median + n*MAD of the linear-scale signal.
+#' The channel is located by case-insensitive pattern match against both $PnN
+#' (channel name) and $PnS (description) in the flowFrame header, so the caller
+#' can pass the semantic name ("VIAKROME") without knowing the raw detector name.
+#' @param flowframe flowFrame — subset already filtered by upstream gates
+#' @param channel_name character(1) semantic or partial channel name to search for
+#' @param max_sd_multiplier numeric(1) threshold = median + n*MAD (default 3)
+#' @return list($valid_indices, $n_before, $n_after, $pct_removed,
+#'              $channel_found, $channel_raw, $threshold)
+apply_viability_gate <- function(
+    flowframe,
+    channel_name,
+    max_sd_multiplier = 3
+) {
+  all_pnn <- colnames(flowCore::exprs(flowframe))
+  all_pns <- as.character(flowCore::pData(flowCore::parameters(flowframe))$desc)
+
+  match_idx <- unique(c(
+    grep(channel_name, all_pnn, ignore.case = TRUE),
+    grep(channel_name, all_pns, ignore.case = TRUE)
+  ))
+
+  n_before <- nrow(flowCore::exprs(flowframe))
+
+  if (length(match_idx) == 0L) {
+    warning(sprintf(
+      "[QC] Viability channel '%s' not found in FCS — dead cell gate skipped.", channel_name
+    ), call. = FALSE)
+    return(list(
+      valid_indices = seq_len(n_before), n_before = n_before, n_after = n_before,
+      pct_removed = 0, channel_found = FALSE, channel_raw = NA_character_, threshold = NA_real_
+    ))
+  }
+
+  raw_channel <- all_pnn[match_idx[1L]]
+  values      <- flowCore::exprs(flowframe)[, raw_channel]
+
+  med       <- median(values, na.rm = TRUE)
+  mad_val   <- mad(values,    na.rm = TRUE)
+  threshold <- med + max_sd_multiplier * mad_val
+
+  valid_indices <- which(values <= threshold & is.finite(values))
+  n_after       <- length(valid_indices)
+
+  list(
+    valid_indices = valid_indices,
+    n_before      = n_before,
+    n_after       = n_after,
+    pct_removed   = 100 * (1 - n_after / n_before),
+    channel_found = TRUE,
+    channel_raw   = raw_channel,
+    threshold     = threshold
+  )
+}
+
+# ------------------------------------------------------------------------------
+# 6. ORCHESTRATOR — per-sample QC pipeline
 # ------------------------------------------------------------------------------
 
 #' Run the full QC pipeline for a single FCS file.
-#' Applies PeacoQC → singlet gate → debris gate in sequence.
+#' Applies PeacoQC → singlet gate → debris gate → viability gate in sequence.
 #' Indices are remapped through the global cell frame at each step so that
 #' the returned valid_indices are always relative to the original FCS row order.
 #'
@@ -229,19 +291,25 @@ run_sample_qc <- function(file_path, qc_config, sample_id = NULL) {
   global_valid <- seq_len(raw$n_raw)
 
   qc_metrics <- list(
-    n_raw           = raw$n_raw,
-    n_after_peacoqc = raw$n_raw,
-    n_after_singlet = raw$n_raw,
-    n_after_debris  = raw$n_raw,
-    n_final         = raw$n_raw
+    n_raw              = raw$n_raw,
+    n_after_peacoqc    = raw$n_raw,
+    n_after_singlet    = raw$n_raw,
+    n_after_debris     = raw$n_raw,
+    n_after_viability  = raw$n_raw,
+    n_final            = raw$n_raw
   )
 
   # Step A: PeacoQC
   peacoqc_cfg <- qc_config$peacoqc %||% list()
-  pqc <- apply_peacoqc_filter(raw$flowframe, channels_to_use = NULL, peacoqc_params = peacoqc_cfg)
-  global_valid               <- global_valid[pqc$valid_indices]
-  qc_metrics$n_after_peacoqc <- length(global_valid)
-  qc_metrics$pct_peacoqc_removed <- pqc$pct_removed
+  if (isTRUE(peacoqc_cfg$enabled %||% TRUE)) {
+    pqc <- apply_peacoqc_filter(raw$flowframe, channels_to_use = NULL, peacoqc_params = peacoqc_cfg)
+    global_valid               <- global_valid[pqc$valid_indices]
+    qc_metrics$n_after_peacoqc <- length(global_valid)
+    qc_metrics$pct_peacoqc_removed <- pqc$pct_removed
+  } else {
+    qc_metrics$n_after_peacoqc <- length(global_valid)
+    qc_metrics$pct_peacoqc_removed <- 0
+  }
 
   # Step B: Singlet gate
   singlet_cfg <- qc_config$singlet %||% list()
@@ -287,7 +355,24 @@ run_sample_qc <- function(file_path, qc_config, sample_id = NULL) {
     qc_metrics$pct_debris_removed <- 0
   }
 
-  qc_metrics$n_final         <- length(global_valid)
+  # Step D: Viability gate
+  viability_cfg <- qc_config$viability %||% list()
+  if (isTRUE(viability_cfg$enabled %||% FALSE)) {
+    via_channel <- as.character(viability_cfg$channel %||% "VIAKROME")
+    via_mult    <- as.numeric(viability_cfg$max_sd_multiplier %||% 3)
+    ff_sub      <- raw$flowframe[global_valid, ]
+    vg          <- apply_viability_gate(ff_sub, channel_name = via_channel,
+                                        max_sd_multiplier = via_mult)
+    global_valid                     <- global_valid[vg$valid_indices]
+    qc_metrics$n_after_viability     <- length(global_valid)
+    qc_metrics$pct_viability_removed <- vg$pct_removed
+    qc_metrics$viability_channel_raw <- vg$channel_raw
+  } else {
+    qc_metrics$n_after_viability     <- length(global_valid)
+    qc_metrics$pct_viability_removed <- 0
+  }
+
+  qc_metrics$n_final           <- length(global_valid)
   qc_metrics$pct_total_removed <- 100 * (1 - length(global_valid) / raw$n_raw)
 
   # Guard: catastrophic removal

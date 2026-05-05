@@ -53,6 +53,34 @@ tryCatch({
   freq_result    <- readRDS(required_files["freq_file"])
   match_table    <- readRDS(required_files["match_file"])
   centroids_list <- readRDS(required_files["centroids_file"])
+
+  # --- AUTO-PHENOTYPING ---
+  source("src/functions/auto_phenotyping.R")
+  message("[Step 05] Running auto-phenotyping on matched population centroids...")
+  pheno_result <- tryCatch(
+    run_auto_phenotyping(
+      centroids_list    = centroids_list,
+      match_table       = match_table,
+      markers           = colnames(centroids_list[[names(centroids_list)[1L]]]),
+      uninformative_gap = 0.5
+    ),
+    error = function(e) {
+      warning(sprintf("[Step 05] Auto-phenotyping failed: %s — continuing without labels.",
+                      e$message), call. = FALSE)
+      NULL
+    }
+  )
+  pheno_xlsx <- NULL
+  if (!is.null(pheno_result)) {
+    pheno_xlsx <- file.path(int_out_dir, "phenotype_annotation_report.xlsx")
+    writexl::write_xlsx(list(PhenotypeAnnotation = pheno_result$report), path = pheno_xlsx)
+    message(sprintf("[Step 05] Phenotype annotation saved: %s  (%d rows)",
+                    pheno_xlsx, nrow(pheno_result$report)))
+    saveRDS(as.list(pheno_result$population_labels),
+            file.path(out_dir, "auto_population_labels.rds"))
+  }
+  # --- END AUTO-PHENOTYPING ---
+
   fm             <- freq_result$freq_matrix
 
   min_samp <- if (isTRUE(config$testing$enabled)) 2L else
@@ -74,8 +102,11 @@ tryCatch({
   baseline_dict <- compute_stratified_baseline(fm)
 
   pop_labels <- config$population_labels
-  if (!is.null(pop_labels)) {
+  if (!is.null(pop_labels) && length(pop_labels) > 0L) {
     message(sprintf("[Step 05] Applying %d population labels from config.", length(pop_labels)))
+  } else if (!is.null(pheno_result)) {
+    pop_labels <- as.list(pheno_result$population_labels)
+    message(sprintf("[Step 05] Using %d auto-generated population labels.", length(pop_labels)))
   }
 
   baseline_report <- format_stratified_report(baseline_dict, match_table, pop_labels)
@@ -112,8 +143,13 @@ tryCatch({
   add_metric(log_obj, "n_batches",    length(unique(baseline_dict$batch)))
   add_metric(log_obj, "n_populations",length(unique(baseline_dict$population)))
   add_metric(log_obj, "freq_ranges_per_batch", freq_ranges)
+  if (!is.null(pheno_result)) {
+    add_metric(log_obj, "n_auto_phenotyped", nrow(pheno_result$report))
+    add_metric(log_obj, "phenotype_labels",  as.list(pheno_result$population_labels))
+  }
 
-  finalize_step_log(log_obj, output_files = c(out_rds, out_xlsx), status = "SUCCESS")
+  pheno_out <- if (!is.null(pheno_xlsx)) pheno_xlsx else character(0L)
+  finalize_step_log(log_obj, output_files = c(out_rds, out_xlsx, pheno_out), status = "SUCCESS")
   write_step_json(log_obj, config$directories$logs)
 
   message("\n=== STEP 5 COMPLETE ===\n")

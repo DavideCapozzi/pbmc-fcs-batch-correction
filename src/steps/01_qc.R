@@ -1,15 +1,16 @@
 #!/usr/bin/env Rscript
-# src/steps/02_qc.R
+# src/steps/01_qc.R
 # ==============================================================================
-# STEP 02: PER-SAMPLE QC FILTERING
+# STEP 01: PER-SAMPLE QC FILTERING
 # Reads raw FCS files with scatter channels, applies PeacoQC for temporal drift
-# and margin-event removal, singlet gating (FSC-H/FSC-A slope), and debris
-# removal (FSC-A vs SSC-A). Produces a per-sample valid cell index list that
-# Step 01 applies when building the SCE.
+# and margin-event removal, singlet gating (FSC-H/FSC-A slope), debris removal
+# (FSC-A vs SSC-A), and viability dye exclusion (ViaKrome: median + 3×MAD).
+# Produces a per-sample valid cell index list that Step 02 applies when building
+# the SCE.
 #
 # Output artifacts:
 #   results/processed/qc_cell_filters.rds   — named list, one entry per sample
-#   results/logs/steps/02_qc_{ts}.json      — step audit JSON
+#   results/logs/steps/01_qc_{ts}.json      — step audit JSON
 # ==============================================================================
 
 suppressPackageStartupMessages({
@@ -21,13 +22,13 @@ suppressPackageStartupMessages({
 source("src/functions/qc.R")
 source("src/functions/step_logger.R")
 
-message("\n=== PIPELINE STEP 2: QC FILTERING ===")
+message("\n=== PIPELINE STEP 1: QC FILTERING ===")
 
 config <- read_yaml("config/global_params.yml")
 
 if (!isTRUE(config$qc$enabled)) {
-  message("[Step 02] qc.enabled = FALSE in config — skipping QC step.")
-  message("[Step 02] Step 01 will load all events without cell filtering.")
+  message("[Step 01] qc.enabled = FALSE in config — skipping QC step.")
+  message("[Step 01] Step 02 will load all events without cell filtering.")
   quit(save = "no", status = 0)
 }
 
@@ -43,13 +44,13 @@ if (!dir.exists(logs_dir)) dir.create(logs_dir, recursive = TRUE)
 all_files_df <- do.call(rbind, lapply(names(raw_dir), function(batch_name) {
   dir_path <- raw_dir[[batch_name]]
   if (!dir.exists(dir_path)) {
-    warning(sprintf("[Step 02] Directory not found for batch '%s': %s", batch_name, dir_path),
+    warning(sprintf("[Step 01] Directory not found for batch '%s': %s", batch_name, dir_path),
             call. = FALSE)
     return(NULL)
   }
   files <- list.files(dir_path, pattern = "\\.fcs$", full.names = TRUE, ignore.case = TRUE)
   if (length(files) == 0L) {
-    warning(sprintf("[Step 02] No FCS files found in: %s", dir_path), call. = FALSE)
+    warning(sprintf("[Step 01] No FCS files found in: %s", dir_path), call. = FALSE)
     return(NULL)
   }
   is_test  <- isTRUE(config$testing$enabled)
@@ -59,15 +60,15 @@ all_files_df <- do.call(rbind, lapply(names(raw_dir), function(batch_name) {
 }))
 
 if (is.null(all_files_df) || nrow(all_files_df) == 0L) {
-  stop("[Step 02 Fatal] No FCS files found across any batch directory.")
+  stop("[Step 01 Fatal] No FCS files found across any batch directory.")
 }
 
-message(sprintf("[Step 02] Files to process: %d across %d batch(es)",
+message(sprintf("[Step 01] Files to process: %d across %d batch(es)",
                 nrow(all_files_df), length(unique(all_files_df$batch_id))))
 
 log_obj <- init_step_log(
-  step_name   = "02_qc",
-  step_number = 2L,
+  step_name   = "01_qc",
+  step_number = 1L,
   input_files = all_files_df$file_path
 )
 
@@ -81,12 +82,12 @@ for (i in seq_len(nrow(all_files_df))) {
   sid <- basename(fp)
   bid <- all_files_df$batch_id[i]
 
-  message(sprintf("[Step 02] [%d/%d] [%s] %s", i, nrow(all_files_df), bid, sid))
+  message(sprintf("[Step 01] [%d/%d] [%s] %s", i, nrow(all_files_df), bid, sid))
 
   result <- tryCatch(
     run_sample_qc(fp, qc_config = qc_cfg, sample_id = sid),
     error = function(e) {
-      warning(sprintf("[Step 02] QC failed for '%s': %s — sample EXCLUDED.", sid, e$message),
+      warning(sprintf("[Step 01] QC failed for '%s': %s — sample EXCLUDED.", sid, e$message),
               call. = FALSE)
       NULL
     }
@@ -119,12 +120,12 @@ mean_pct_removed <- mean(
   na.rm = TRUE
 )
 
-message(sprintf("[Step 02] Samples processed: %d  |  Excluded: %d  |  Mean removal: %.1f%%",
+message(sprintf("[Step 01] Samples processed: %d  |  Excluded: %d  |  Mean removal: %.1f%%",
                 n_processed, n_excluded, mean_pct_removed))
 
 out_file <- file.path(out_dir, "qc_cell_filters.rds")
 saveRDS(qc_filters, out_file)
-message(sprintf("[Step 02] Cell filters saved: %s", out_file))
+message(sprintf("[Step 01] Cell filters saved: %s", out_file))
 
 add_metric(log_obj, "n_samples_total",     nrow(all_files_df))
 add_metric(log_obj, "n_samples_processed", n_processed)
@@ -135,4 +136,4 @@ add_metric(log_obj, "per_sample_qc",       qc_summary_list)
 finalize_step_log(log_obj, output_files = out_file, status = "SUCCESS")
 write_step_json(log_obj, logs_dir)
 
-message("\n=== STEP 2 COMPLETE ===\n")
+message("\n=== STEP 1 COMPLETE ===\n")

@@ -28,9 +28,12 @@ config <- read_yaml(config_path)
 out_root <- config$directories$logs
 if (!dir.exists(out_root)) dir.create(out_root, recursive = TRUE)
 
-# Define Log File
-timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
-log_file  <- file.path(out_root, paste0("pipeline_execution_", timestamp, ".log"))
+# Define run-specific log directory — isolates each execution for clinical audit
+timestamp         <- format(Sys.time(), "%Y%m%d_%H%M%S")
+PIPELINE_RUN_ID   <- timestamp
+PIPELINE_LOGS_DIR <- file.path(out_root, paste0("run_", timestamp))
+if (!dir.exists(PIPELINE_LOGS_DIR)) dir.create(PIPELINE_LOGS_DIR, recursive = TRUE)
+log_file          <- file.path(PIPELINE_LOGS_DIR, paste0("pipeline_execution_", timestamp, ".log"))
 
 # 3. Helper Functions
 # ------------------------------------------------------------------------------
@@ -82,11 +85,11 @@ sink(con, type = "message")  # Capture Messages/Warnings (IMPORTANT for RStudio)
 # Use tryCatch to ensure sink() is closed even if the pipeline crashes
 tryCatch({
 
-  # --- STEP 2: QC FILTERING (runs before load; produces cell filters for Step 01) ---
-  run_pipeline_step("src/steps/02_qc.R")
+  # --- STEP 1: QC FILTERING ---
+  run_pipeline_step("src/steps/01_qc.R")
 
-  # --- STEP 1: LOAD & TRANSFORM (applies QC filters if present) ---
-  run_pipeline_step("src/steps/01_load.R")
+  # --- STEP 2: LOAD & TRANSFORM (applies QC filters from Step 1) ---
+  run_pipeline_step("src/steps/02_load.R")
 
   # --- CONDITIONAL BRANCH: MFI CORRECTION vs. FREQUENCY INTEGRATION ---
   run_per_batch <- isTRUE(config$clustering$run_per_batch)

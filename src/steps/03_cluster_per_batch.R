@@ -34,7 +34,7 @@ if (!isTRUE(config$clustering$run_per_batch)) {
 
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 if (!file.exists(in_file)) {
-  stop("[Step 03] filtered_sce.rds not found. Run Steps 02 and 01 first.")
+  stop("[Step 03] filtered_sce.rds not found. Run Steps 01 and 02 first.")
 }
 
 log_obj <- init_step_log(

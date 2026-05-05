@@ -1,10 +1,10 @@
 #!/usr/bin/env Rscript
 
-# src/steps/01_load.R
+# src/steps/02_load.R
 # ==============================================================================
-# STEP 01: DATA INGESTION & TRANSFORMATION
+# STEP 02: DATA INGESTION & TRANSFORMATION
 # Loads raw FCS files, detects shared biological markers, applies arcsinh
-# transformation, and builds the intermediate SCE. If Step 02 produced
+# transformation, and builds the intermediate SCE. If Step 01 produced
 # qc_cell_filters.rds, those per-sample cell index filters are applied before
 # the SCE is constructed, removing doublets/debris identified by QC gating.
 # Output: results/intermediate/filtered_sce.rds
@@ -20,7 +20,7 @@ suppressPackageStartupMessages({
 source("src/functions/fcs_io.R")
 source("src/functions/step_logger.R")
 
-message("\n=== PIPELINE STEP 1: DATA INGESTION ===")
+message("\n=== PIPELINE STEP 2: DATA INGESTION ===")
 
 config_path <- "config/global_params.yml"
 if (!file.exists(config_path)) stop("[Fatal] Config file not found: ", config_path)
@@ -43,8 +43,8 @@ if (!is.na(cofactor_val) && cofactor_val < 10) {
 }
 
 log_obj <- init_step_log(
-  step_name   = "01_load",
-  step_number = 1L,
+  step_name   = "02_load",
+  step_number = 2L,
   input_files = unlist(lapply(raw_dir, function(d) list.files(d, "\\.fcs$", full.names = TRUE)))
 )
 
@@ -64,10 +64,10 @@ tryCatch({
   n_cells_raw <- nrow(cell_tbl)
   add_metric(log_obj, "n_cells_before_qc_filter", n_cells_raw)
 
-  # Apply QC cell filters produced by Step 02 (if present)
+  # Apply QC cell filters produced by Step 01 (if present)
   qc_filter_file <- file.path(proc_dir, "qc_cell_filters.rds")
   if (file.exists(qc_filter_file)) {
-    message("[Step 01] QC cell filters detected — applying per-sample filters.")
+    message("[Step 02] QC cell filters detected — applying per-sample filters.")
     qc_filters   <- readRDS(qc_filter_file)
     filtered_rows <- integer(0L)
 
@@ -90,13 +90,13 @@ tryCatch({
     add_metric(log_obj, "n_cells_after_qc_filter", n_after)
     add_metric(log_obj, "pct_qc_removed",           round(pct_removed, 2))
   } else {
-    message("[Step 01] No QC filters found — loading all events (run Step 02 first for QC).")
+    message("[Step 02] No QC filters found — loading all events (run Step 01 first for QC).")
     add_metric(log_obj, "n_cells_after_qc_filter", n_cells_raw)
   }
 
   # Integrity checks
   batch_counts <- table(cell_tbl$batch)
-  message("[Step 01] Cell counts per batch:")
+  message("[Step 02] Cell counts per batch:")
   print(batch_counts)
 
   for (b in unique(cell_tbl$batch)) {
@@ -105,7 +105,7 @@ tryCatch({
   }
 
   n_markers <- ncol(cell_tbl) - 2L
-  message(sprintf("[Step 01] Dimensions: %d cells x %d biological markers", nrow(cell_tbl), n_markers))
+  message(sprintf("[Step 02] Dimensions: %d cells x %d biological markers", nrow(cell_tbl), n_markers))
 
   if (n_markers < 3L) {
     stop("[Fatal] Too few shared markers detected. Check 'exclude_channels' in config.")
@@ -129,17 +129,17 @@ tryCatch({
 
   out_file <- file.path(out_dir, "filtered_sce.rds")
   saveRDS(sce, out_file)
-  message(sprintf("[Step 01] Artifact saved: %s", out_file))
+  message(sprintf("[Step 02] Artifact saved: %s", out_file))
 
   finalize_step_log(log_obj, output_files = out_file, status = "SUCCESS")
   write_step_json(log_obj, config$directories$logs)
 
-  message("=== STEP 1 COMPLETE ===\n")
+  message("=== STEP 2 COMPLETE ===\n")
 
 }, error = function(e) {
   add_metric(log_obj, "error_message", e$message)
   finalize_step_log(log_obj, output_files = character(0L), status = "FAILURE")
   write_step_json(log_obj, config$directories$logs)
-  message("\n[Error] Step 01 failed: ", e$message)
-  stop(paste("[Step 01 Fatal]", e$message), call. = FALSE)
+  message("\n[Error] Step 02 failed: ", e$message)
+  stop(paste("[Step 02 Fatal]", e$message), call. = FALSE)
 })
