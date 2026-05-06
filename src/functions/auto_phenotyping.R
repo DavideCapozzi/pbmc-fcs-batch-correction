@@ -223,8 +223,9 @@ compute_reliability_score <- function(expr, thresholds, defining_markers, all_ce
 #'   $population_labels — named character vector (names = "pop_1" … "pop_N")
 run_auto_phenotyping <- function(centroids_list,
                                  match_table,
-                                 markers           = NULL,
-                                 uninformative_gap = 0.5) {
+                                 markers                   = NULL,
+                                 uninformative_gap         = 0.5,
+                                 low_reliability_threshold = 0.30) {
   stopifnot(
     is.list(centroids_list), length(centroids_list) >= 1L,
     is.data.frame(match_table),
@@ -243,6 +244,34 @@ run_auto_phenotyping <- function(centroids_list,
 
   if (nrow(matched) == 0L) stop("[AutoPheno] No matched populations found in match_table.")
 
+  # Build global thresholds by pooling centroids from all matched populations across all batches.
+  # This ensures the same decision boundary is used regardless of per-batch MFI scale differences.
+  avail_m_global <- Reduce(intersect, lapply(centroids_list, colnames))
+  avail_m_global <- intersect(markers, avail_m_global)
+
+  global_thr_rows <- list()
+  for (row_idx in seq_len(nrow(matched))) {
+    row_m <- matched[row_idx, ]
+    for (bat_col in c("batch_a", "batch_b")) {
+      clust_col <- if (bat_col == "batch_a") "cluster_a" else "cluster_b"
+      bat       <- row_m[[bat_col]]
+      cid       <- as.character(row_m[[clust_col]])
+      if (!is.na(bat) && bat %in% names(centroids_list) && !is.na(cid)) {
+        cmat_tmp <- centroids_list[[bat]]
+        if (cid %in% rownames(cmat_tmp)) {
+          global_thr_rows[[length(global_thr_rows) + 1L]] <-
+            cmat_tmp[cid, avail_m_global, drop = FALSE]
+        }
+      }
+    }
+  }
+  global_thresholds <- if (length(global_thr_rows) >= 2L) {
+    combined_mat <- do.call(rbind, global_thr_rows)
+    compute_adaptive_thresholds(combined_mat, uninformative_gap)
+  } else {
+    setNames(rep(NA_real_, length(avail_m_global)), avail_m_global)
+  }
+
   all_rows            <- list()
   labels_by_pop       <- list()
 
@@ -254,10 +283,6 @@ run_auto_phenotyping <- function(centroids_list,
       warning(sprintf("[AutoPheno] Batch '%s': no shared markers — skipped.", b))
       next
     }
-
-    thresholds_b <- compute_adaptive_thresholds(
-      cmat[, avail_markers, drop = FALSE], uninformative_gap
-    )
 
     for (i in seq_len(nrow(matched))) {
       row    <- matched[i, ]
@@ -278,12 +303,20 @@ run_auto_phenotyping <- function(centroids_list,
       }
 
       expr_vec <- cmat[cluster_id, avail_markers]
-      pheno    <- classify_population(expr_vec, thresholds_b[avail_markers])
+      pheno    <- classify_population(expr_vec, global_thresholds[avail_markers])
       rel      <- compute_reliability_score(
-        expr_vec, thresholds_b[avail_markers],
+        expr_vec, global_thresholds[avail_markers],
         pheno$defining_markers,
         cmat[, avail_markers, drop = FALSE]
       )
+
+      label_out <- if (!is.na(rel) && rel < low_reliability_threshold) {
+        paste0(pheno$phenotype_label, " [low confidence]")
+      } else if (is.na(rel)) {
+        paste0(pheno$phenotype_label, " [unclassified]")
+      } else {
+        pheno$phenotype_label
+      }
 
       centroid_vals <- setNames(rep(NA_real_, length(markers)), markers)
       centroid_vals[avail_markers] <- round(expr_vec, 4L)
@@ -292,13 +325,13 @@ run_auto_phenotyping <- function(centroids_list,
         list(population_id = pop_id, batch = b, cluster_id = cluster_id),
         as.list(centroid_vals),
         list(
-          phenotype_label   = pheno$phenotype_label,
+          phenotype_label   = label_out,
           reliability_score = round(rel %||% NA_real_, 4L),
           defining_markers  = paste(pheno$defining_markers, collapse = "; ")
         )
       )
 
-      labels_by_pop[[pop_id]] <- c(labels_by_pop[[pop_id]], pheno$phenotype_label)
+      labels_by_pop[[pop_id]] <- c(labels_by_pop[[pop_id]], label_out)
     }
   }
 

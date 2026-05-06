@@ -59,10 +59,11 @@ tryCatch({
   message("[Step 05] Running auto-phenotyping on matched population centroids...")
   pheno_result <- tryCatch(
     run_auto_phenotyping(
-      centroids_list    = centroids_list,
-      match_table       = match_table,
-      markers           = colnames(centroids_list[[names(centroids_list)[1L]]]),
-      uninformative_gap = 0.5
+      centroids_list            = centroids_list,
+      match_table               = match_table,
+      markers                   = colnames(centroids_list[[names(centroids_list)[1L]]]),
+      uninformative_gap         = as.numeric(config$auto_phenotyping$uninformative_gap %||% 0.5),
+      low_reliability_threshold = as.numeric(config$auto_phenotyping$low_reliability_threshold %||% 0.30)
     ),
     error = function(e) {
       warning(sprintf("[Step 05] Auto-phenotyping failed: %s — continuing without labels.",
@@ -100,6 +101,26 @@ tryCatch({
   message("[Step 05] Computing stratified reference distributions...")
 
   baseline_dict <- compute_stratified_baseline(fm)
+
+  # Flag populations with suspiciously high frequency — may indicate clustering collapse
+  max_freq_warn  <- as.numeric(int_cfg$max_population_freq_warning %||% 0.40)
+  dominant_flags <- baseline_dict[baseline_dict$mean_freq > max_freq_warn, ]
+  if (nrow(dominant_flags) > 0L) {
+    for (i in seq_len(nrow(dominant_flags))) {
+      warning(sprintf(
+        "[Step 05] Dominant population: %s in batch '%s' (mean_freq=%.3f > %.2f) — verify in UMAP",
+        dominant_flags$population[i], dominant_flags$batch[i],
+        dominant_flags$mean_freq[i], max_freq_warn
+      ), call. = FALSE)
+    }
+    add_metric(log_obj, "dominant_populations_flagged",
+               lapply(seq_len(nrow(dominant_flags)), function(i) list(
+                 batch      = dominant_flags$batch[i],
+                 population = dominant_flags$population[i],
+                 mean_freq  = round(dominant_flags$mean_freq[i], 4L)
+               )))
+  }
+  baseline_dict$freq_warning <- baseline_dict$mean_freq > max_freq_warn
 
   pop_labels <- config$population_labels
   if (!is.null(pop_labels) && length(pop_labels) > 0L) {

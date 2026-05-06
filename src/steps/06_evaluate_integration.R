@@ -50,16 +50,24 @@ tryCatch({
   batches <- names(centroids_list)
   markers <- colnames(centroids_list[[batches[1L]]])
 
-  # Metric 1: JSD per matched pair
-  message("[Step 06] Computing Jensen-Shannon Divergence per matched pair...")
-  validation           <- validate_cluster_matches(match_table, centroids_list, markers)
+  # Metric 1: Per-marker delta (primary) + JSD (secondary) per matched pair
+  delta_threshold <- as.numeric(config$integration$max_marker_delta_arcsinh %||% 2.0)
+  message("[Step 06] Computing per-marker delta and JSD per matched pair...")
+  validation           <- validate_cluster_matches(match_table, centroids_list, markers,
+                                                    delta_threshold = delta_threshold)
   cluster_match_report <- validation$summary
 
-  n_jsd_pass <- 0L
-  if (nrow(cluster_match_report) > 0) {
-    n_jsd_pass <- sum(cluster_match_report$jsd_pass, na.rm = TRUE)
+  n_jsd_pass        <- 0L
+  n_delta_pass      <- 0L
+  mean_delta_global <- NA_real_
+  if (nrow(cluster_match_report) > 0L) {
+    n_jsd_pass        <- sum(cluster_match_report$jsd_pass,  na.rm = TRUE)
+    n_delta_pass      <- sum(cluster_match_report$delta_pass, na.rm = TRUE)
+    mean_delta_global <- round(mean(cluster_match_report$mean_marker_delta, na.rm = TRUE), 4L)
     message(sprintf("[Step 06] JSD < 0.1: %d / %d matched populations",
                     n_jsd_pass, nrow(cluster_match_report)))
+    message(sprintf("[Step 06] MarkerDelta < %.1f arcsinh: %d / %d matched populations (mean=%.3f)",
+                    delta_threshold, n_delta_pass, nrow(cluster_match_report), mean_delta_global))
   }
 
   # Metric 2: Intra-batch CV
@@ -98,10 +106,13 @@ tryCatch({
   )
   message(sprintf("[Step 06] Validation report saved: %s", out_xlsx))
 
-  add_metric(log_obj, "n_matched_pairs", nrow(cluster_match_report))
-  add_metric(log_obj, "n_jsd_pass",      n_jsd_pass)
-  add_metric(log_obj, "n_cv_flagged",    n_flagged)
-  add_metric(log_obj, "cv_threshold",    cv_threshold)
+  add_metric(log_obj, "n_matched_pairs",       nrow(cluster_match_report))
+  add_metric(log_obj, "n_jsd_pass",            n_jsd_pass)
+  add_metric(log_obj, "n_delta_pass",          n_delta_pass)
+  add_metric(log_obj, "mean_marker_delta_global", mean_delta_global)
+  add_metric(log_obj, "delta_threshold",       delta_threshold)
+  add_metric(log_obj, "n_cv_flagged",          n_flagged)
+  add_metric(log_obj, "cv_threshold",          cv_threshold)
 
   finalize_step_log(log_obj, output_files = out_xlsx, status = "SUCCESS")
   write_step_json(log_obj, config$directories$logs)

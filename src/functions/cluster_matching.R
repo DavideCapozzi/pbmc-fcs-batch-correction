@@ -130,15 +130,20 @@ match_metaclusters <- function(centroids_list, markers, similarity_threshold = 0
 }
 
 #' @title Validate Cluster Match Quality
-#' @description Computes Jensen-Shannon Divergence for each matched pair using
-#'   softmax-normalized centroids as pseudo-probability vectors. JSD is normalized
-#'   to [0,1] by dividing by log(2).
+#' @description Computes per-marker absolute delta (primary metric) and
+#'   Jensen-Shannon Divergence (secondary/legacy metric) for each matched pair.
+#'   Per-marker delta is interpretable in arcsinh units and robust to cross-batch
+#'   MFI scale shifts; JSD on softmax centroids is sensitive to absolute values
+#'   and retained for backward compatibility only.
 #' @param match_table data.frame from match_metaclusters().
 #' @param centroids_list Named list of centroid matrices.
 #' @param markers Character vector of markers.
-#' @return List: $summary (data.frame), $jsd_values (named numeric),
-#'   $unmatched_clusters (data.frame).
-validate_cluster_matches <- function(match_table, centroids_list, markers) {
+#' @param delta_threshold numeric(1) max_marker_delta threshold for delta_pass
+#'   (default 2.0 arcsinh units). Values < 1.0 = negligible, 1.0-2.0 = moderate.
+#' @return List: $summary (data.frame with delta + JSD columns), $jsd_values
+#'   (named numeric), $unmatched_clusters (data.frame).
+validate_cluster_matches <- function(match_table, centroids_list, markers,
+                                     delta_threshold = 2.0) {
 
   softmax <- function(x) {
     x <- x - max(x, na.rm = TRUE)
@@ -154,7 +159,7 @@ validate_cluster_matches <- function(match_table, centroids_list, markers) {
   }
 
   jsd <- function(p, q) {
-    m      <- (p + q) / 2
+    m       <- (p + q) / 2
     jsd_val <- 0.5 * kl_div(p, m) + 0.5 * kl_div(q, m)
     jsd_val / log(2)
   }
@@ -165,24 +170,37 @@ validate_cluster_matches <- function(match_table, centroids_list, markers) {
 
   matched_rows <- match_table[!is.na(match_table$matched_population_id), ]
 
-  jsd_values <- setNames(numeric(nrow(matched_rows)), matched_rows$matched_population_id)
+  jsd_values   <- setNames(numeric(nrow(matched_rows)), matched_rows$matched_population_id)
   summary_rows <- vector("list", nrow(matched_rows))
 
   for (k in seq_len(nrow(matched_rows))) {
-    row   <- matched_rows[k, ]
-    c_a   <- centroids_list[[batch_a]][row$cluster_a, markers]
-    c_b   <- centroids_list[[batch_b]][row$cluster_b, markers]
+    row <- matched_rows[k, ]
+    c_a <- centroids_list[[batch_a]][row$cluster_a, markers]
+    c_b <- centroids_list[[batch_b]][row$cluster_b, markers]
+
     if (anyNA(c_a) || anyNA(c_b)) {
-      jsd_val <- NA_real_
+      jsd_val    <- NA_real_
+      mean_delta <- NA_real_
+      max_delta  <- NA_real_
+      marker_max <- NA_character_
     } else {
-      jsd_val <- jsd(softmax(c_a), softmax(c_b))
+      jsd_val    <- jsd(softmax(c_a), softmax(c_b))
+      delta_vec  <- abs(c_a - c_b)
+      mean_delta <- mean(delta_vec, na.rm = TRUE)
+      max_delta  <- max(delta_vec,  na.rm = TRUE)
+      marker_max <- markers[which.max(delta_vec)]
     }
-    jsd_values[k]  <- jsd_val
+
+    jsd_values[k]   <- jsd_val
     summary_rows[[k]] <- data.frame(
       matched_population_id = row$matched_population_id,
       cluster_a             = row$cluster_a,
       cluster_b             = row$cluster_b,
       cosine_similarity     = row$cosine_similarity,
+      mean_marker_delta     = round(mean_delta, 4L),
+      max_marker_delta      = round(max_delta,  4L),
+      marker_with_max_delta = marker_max,
+      delta_pass            = !is.na(max_delta) && max_delta < delta_threshold,
       jsd                   = jsd_val,
       jsd_pass              = !is.na(jsd_val) && jsd_val < 0.1,
       stringsAsFactors      = FALSE

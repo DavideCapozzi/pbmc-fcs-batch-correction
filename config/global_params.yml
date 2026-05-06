@@ -53,6 +53,8 @@ qc:
     use_IQR_outlier_detection: true
     IQR_multiplier: 3.5
     min_cells: 150
+    max_pct_per_step: 0.60          # Trigger retry if PeacoQC removes > 60% of events
+    retry_iqr_multiplier_step: 0.5  # Add this to IQR_multiplier on retry
 
   singlet:
     enabled: true
@@ -90,7 +92,14 @@ integration:
   min_samples_per_batch: 3
   similarity_threshold: 0.70
   n_bootstrap: 1000
+  max_marker_delta_arcsinh: 2.0   # delta_pass = TRUE if max per-marker |Δ| < this threshold
+  max_population_freq_warning: 0.40  # Warn if mean_freq > 40% in any (batch, population)
   
+auto_phenotyping:
+  enabled: true
+  uninformative_gap: 0.5          # Min k-means center separation to consider a marker informative
+  low_reliability_threshold: 0.30 # Append "[low confidence]" when reliability < this value
+
 scoring:
   run_patient_scoring: true
   z_score_threshold: 2.0  # Clinical standard for 95% confidence interval
