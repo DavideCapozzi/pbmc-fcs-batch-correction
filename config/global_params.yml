@@ -19,7 +19,7 @@ directories:
 
 testing:
   enabled: true
-  max_files_per_panel: 3
+  max_files_per_panel: 10
 
 # Marker Configuration
 markers:

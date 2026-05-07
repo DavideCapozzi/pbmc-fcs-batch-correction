@@ -2,11 +2,12 @@
 # ==============================================================================
 # DIMENSIONALITY REDUCTION MODULE
 # Description: Wrapper for UMAP generation and plotting (Pre/Post correction QC).
-# Dependencies: scater, ggplot2, SingleCellExperiment
+# Dependencies: scater, ggplot2, ggrepel, SingleCellExperiment, patchwork
 # ==============================================================================
 
 library(scater)
 library(ggplot2)
+library(ggrepel)
 library(SingleCellExperiment)
 library(patchwork)
 
@@ -99,32 +100,69 @@ plot_umap_split <- function(sce, color_by, split_by, out_path) {
 
 #' @title Plot UMAP Colored by Matched Population
 #' @description UMAP for a single batch colored by matched_population_id.
-#'   Cells with NA (unmatched clusters) are shown in grey.
+#'   Cells with NA (unmatched clusters) are shown in grey. When population_labels
+#'   is provided, each cluster centroid is annotated with its biological label.
 #' @param sce SCE with UMAP in reducedDims and matched_population_id in colData.
 #' @param batch_id Character string for the plot title.
 #' @param out_path Path to save PDF.
-plot_umap_matched_populations <- function(sce, batch_id, out_path) {
+#' @param population_labels Named list mapping pop_id → biological label string, or NULL.
+plot_umap_matched_populations <- function(sce, batch_id, out_path,
+                                          population_labels = NULL) {
 
   message(sprintf("[DimRed] Plotting matched-population UMAP for batch: %s", batch_id))
 
-  p <- scater::plotReducedDim(
-    sce, dimred = "UMAP",
-    colour_by  = "matched_population_id",
-    other_fields = "matched_population_id"
-  ) +
-    ggplot2::scale_colour_discrete(na.value = "grey80") +
+  umap_mat <- reducedDim(sce, "UMAP")
+  pop_ids  <- as.character(sce$matched_population_id)
+
+  df <- data.frame(
+    UMAP1 = umap_mat[, 1],
+    UMAP2 = umap_mat[, 2],
+    pop   = pop_ids,
+    stringsAsFactors = FALSE
+  )
+
+  matched_ids <- sort(unique(pop_ids[!is.na(pop_ids)]))
+
+  centroid_df <- do.call(rbind, lapply(matched_ids, function(pid) {
+    idx  <- which(pop_ids == pid)
+    bio  <- population_labels[[pid]]
+    lbl  <- if (!is.null(bio) && nchar(bio) > 0L) paste0(pid, "\n", bio) else pid
+    data.frame(
+      UMAP1 = mean(umap_mat[idx, 1]),
+      UMAP2 = mean(umap_mat[idx, 2]),
+      label = lbl,
+      stringsAsFactors = FALSE
+    )
+  }))
+
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = UMAP1, y = UMAP2, colour = pop)) +
+    ggplot2::geom_point(size = 0.3, alpha = 0.4) +
+    ggrepel::geom_label_repel(
+      data         = centroid_df,
+      mapping      = ggplot2::aes(x = UMAP1, y = UMAP2, label = label),
+      size         = 2.3,
+      alpha        = 0.85,
+      max.overlaps = 40,
+      label.padding = ggplot2::unit(0.15, "lines"),
+      inherit.aes  = FALSE
+    ) +
+    ggplot2::scale_colour_discrete(na.value = "grey80", name = "Population") +
     ggplot2::theme_minimal() +
+    ggplot2::guides(colour = ggplot2::guide_legend(override.aes = list(size = 3, alpha = 1))) +
     ggplot2::ggtitle(paste("Matched Populations —", batch_id))
 
-  ggplot2::ggsave(out_path, plot = p, width = 8, height = 6)
+  ggplot2::ggsave(out_path, plot = p, width = 11, height = 8)
 }
 
 #' @title Plot Side-by-Side UMAP for Both Batches
 #' @description Assembles per-batch UMAPs with a consistent population color
 #'   palette so matched populations share the same color across panels.
+#'   When population_labels is provided, cluster centroids are annotated.
 #' @param sce_list Named list of per-batch SCE objects (each with UMAP computed).
 #' @param out_path Path to save PDF.
-plot_umap_batch_comparison <- function(sce_list, out_path) {
+#' @param population_labels Named list mapping pop_id → biological label string, or NULL.
+plot_umap_batch_comparison <- function(sce_list, out_path,
+                                       population_labels = NULL) {
 
   message("[DimRed] Generating side-by-side batch comparison UMAP...")
 
@@ -141,16 +179,40 @@ plot_umap_batch_comparison <- function(sce_list, out_path) {
   color_map <- setNames(palette, all_levels)
 
   plots <- lapply(names(sce_list), function(b) {
-    sce_b <- sce_list[[b]]
-    pop_factor <- factor(as.character(sce_b$matched_population_id),
-                         levels = c(all_levels, NA))
+    sce_b    <- sce_list[[b]]
+    umap_mat <- reducedDim(sce_b, "UMAP")
+    pop_ids  <- as.character(sce_b$matched_population_id)
 
-    umap_coords <- as.data.frame(reducedDim(sce_b, "UMAP"))
-    colnames(umap_coords) <- c("UMAP1", "UMAP2")
-    umap_coords$pop <- pop_factor
+    umap_coords <- data.frame(
+      UMAP1 = umap_mat[, 1],
+      UMAP2 = umap_mat[, 2],
+      pop   = factor(pop_ids, levels = c(all_levels, NA))
+    )
+
+    matched_ids <- sort(unique(pop_ids[!is.na(pop_ids)]))
+    centroid_df <- do.call(rbind, lapply(matched_ids, function(pid) {
+      idx <- which(pop_ids == pid)
+      bio <- population_labels[[pid]]
+      lbl <- if (!is.null(bio) && nchar(bio) > 0L) paste0(pid, "\n", bio) else pid
+      data.frame(
+        UMAP1 = mean(umap_mat[idx, 1]),
+        UMAP2 = mean(umap_mat[idx, 2]),
+        label = lbl,
+        stringsAsFactors = FALSE
+      )
+    }))
 
     ggplot2::ggplot(umap_coords, ggplot2::aes(x = UMAP1, y = UMAP2, colour = pop)) +
       ggplot2::geom_point(size = 0.3, alpha = 0.5) +
+      ggrepel::geom_label_repel(
+        data         = centroid_df,
+        mapping      = ggplot2::aes(x = UMAP1, y = UMAP2, label = label),
+        size         = 2.0,
+        alpha        = 0.82,
+        max.overlaps = 40,
+        label.padding = ggplot2::unit(0.12, "lines"),
+        inherit.aes  = FALSE
+      ) +
       ggplot2::scale_colour_manual(values = color_map, na.value = "grey80",
                                    name = "Population", drop = FALSE) +
       ggplot2::theme_minimal() +
@@ -165,5 +227,5 @@ plot_umap_batch_comparison <- function(sce_list, out_path) {
     patchwork::plot_annotation(title = "Cross-Batch Matched Population Comparison")
 
   ggplot2::ggsave(out_path, plot = combined,
-                  width = 8 * length(sce_list), height = 7)
+                  width = 9 * length(sce_list), height = 8)
 }

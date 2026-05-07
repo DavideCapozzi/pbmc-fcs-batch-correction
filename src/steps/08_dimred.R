@@ -56,6 +56,11 @@ tryCatch({
 
     sce_list <- setNames(lapply(sce_files, readRDS), batches)
 
+    pop_labels_file <- file.path(out_dir, "auto_population_labels.rds")
+    population_labels <- if (file.exists(pop_labels_file)) readRDS(pop_labels_file) else NULL
+    if (!is.null(population_labels))
+      message(sprintf("[Step 08] Loaded %d population labels for UMAP annotation.", length(population_labels)))
+
     # Pre-clustering UMAP on full filtered SCE for reference
     in_pre <- file.path(config$directories$intermediate, "filtered_sce.rds")
     if (file.exists(in_pre)) {
@@ -81,14 +86,14 @@ tryCatch({
 
       if ("matched_population_id" %in% names(colData(sce_b_umap))) {
         f3 <- file.path(fig_dir, paste0("umap_03_", b, "_matched_populations.pdf"))
-        plot_umap_matched_populations(sce_b_umap, b, f3)
+        plot_umap_matched_populations(sce_b_umap, b, f3, population_labels = population_labels)
         umap_files_written <- c(umap_files_written, f3)
       }
     }
 
     if (all(sapply(sce_list, function(s) "matched_population_id" %in% names(colData(s))))) {
       f4 <- file.path(fig_dir, "umap_04_batch_comparison.pdf")
-      plot_umap_batch_comparison(sce_list, f4)
+      plot_umap_batch_comparison(sce_list, f4, population_labels = population_labels)
       umap_files_written <- c(umap_files_written, f4)
     }
 
