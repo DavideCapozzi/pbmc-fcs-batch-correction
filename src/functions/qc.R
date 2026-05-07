@@ -397,6 +397,7 @@ run_sample_qc <- function(file_path, qc_config, sample_id = NULL) {
     qc_metrics$n_after_viability     <- length(global_valid)
     qc_metrics$pct_viability_removed <- vg$pct_removed
     qc_metrics$viability_channel_raw <- vg$channel_raw
+    qc_metrics$viability_threshold   <- vg$threshold
   } else {
     qc_metrics$n_after_viability     <- length(global_valid)
     qc_metrics$pct_viability_removed <- 0

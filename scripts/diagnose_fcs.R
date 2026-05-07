@@ -29,6 +29,7 @@ suppressPackageStartupMessages({
   library(flowCore)
   library(yaml)
   library(jsonlite)
+  library(parallel)
 })
 
 source("src/functions/qc.R")
@@ -131,7 +132,7 @@ temporal_analysis <- function(ff, n_bins = 20L) {
     time_vals <- mat[, time_col]
     # Some cytometers store time in 10ms ticks; normalise to rank if the range
     # is tiny (< 1) so bin boundaries still make sense.
-    if (max(time_vals, na.rm = TRUE) < 2) time_vals <- seq_len(n_events)
+    if (all(is.na(time_vals)) || max(time_vals, na.rm = TRUE) < 2) time_vals <- seq_len(n_events)
   } else {
     time_vals <- seq_len(n_events)
   }
@@ -233,6 +234,7 @@ gate_cascade <- function(file_path, qc_config, sample_id) {
       "passed"
     }
 
+    gp <- m$gate_params %||% list()
     list(
       n_raw              = m$n_raw,
       n_after_peacoqc    = m$n_after_peacoqc,
@@ -248,6 +250,19 @@ gate_cascade <- function(file_path, qc_config, sample_id) {
       peacoqc_iqr_used     = m$peacoqc_iqr_used %||% NA_real_,
       peacoqc_retry_triggered = isTRUE(m$peacoqc_retry_triggered),
       viability_channel    = m$viability_channel_raw %||% NA_character_,
+      viability_threshold  = m$viability_threshold   %||% NA_real_,
+      singlet_gate_center  = gp$singlet_center %||% NA_real_,
+      singlet_gate_mad     = gp$singlet_mad    %||% NA_real_,
+      singlet_gate_lower   = gp$singlet_lower  %||% NA_real_,
+      singlet_gate_upper   = gp$singlet_upper  %||% NA_real_,
+      singlet_efficiency_pct = if (!is.null(m$n_raw) && !is.na(m$n_raw) && m$n_raw > 0)
+        round(100 * (m$n_after_singlet %||% m$n_raw) / m$n_raw, 2) else NA_real_,
+      fsc_min_thresh       = gp$fsc_min_thresh %||% NA_real_,
+      ssc_max_thresh       = gp$ssc_max_thresh %||% NA_real_,
+      viability_suspicious = isTRUE(
+        (m$pct_viability_removed %||% NA_real_) < 2 |
+        (m$pct_viability_removed %||% NA_real_) > 30
+      ),
       exclusion_reason     = reason
     )
   }, error = function(e) {
@@ -294,12 +309,18 @@ prev_qc <- if (file.exists(qc_filters_file)) {
 }
 
 # Discover all FCS files
-raw_dirs <- config$directories$raw
-all_files <- do.call(c, lapply(names(raw_dirs), function(batch) {
+raw_dirs  <- config$directories$raw
+all_files <- do.call(rbind, lapply(names(raw_dirs), function(batch) {
   fcs <- list.files(raw_dirs[[batch]], pattern = "\\.fcs$",
                     full.names = TRUE, recursive = FALSE)
+  if (length(fcs) == 0L) return(NULL)
   data.frame(path = fcs, batch = batch, stringsAsFactors = FALSE)
 }))
+
+if (is.null(all_files) || nrow(all_files) == 0L) {
+  message("[Diag] No FCS files found across any batch directory. Exiting.")
+  quit(save = "no", status = 0)
+}
 
 message(sprintf("[Diag] Found %d FCS files across %d batches.",
                 nrow(all_files), length(raw_dirs)))
@@ -314,23 +335,31 @@ get_prev_outcome <- function(fname) {
   return("unknown")
 }
 
-# Per-file analysis
-file_results <- list()
+# Per-file analysis (parallelised)
+n_cores <- min(detectCores(logical = FALSE), as.integer(config$n_cores %||% 4L))
 
-for (i in seq_len(nrow(all_files))) {
+# Progress log — workers write here; monitor with: tail -f <path>
+prog_log <- file.path(diag_dir, paste0("progress_", ts, ".log"))
+writeLines(sprintf("=== FCS Diagnostic progress log — %d files, %d cores ===",
+                   nrow(all_files), n_cores), prog_log)
+message(sprintf("[Diag] Parallelising over %d physical cores.", n_cores))
+message(sprintf("[Diag] Follow progress in a second terminal:  tail -f %s", prog_log))
+
+log_progress <- function(...) {
+  line <- paste0(format(Sys.time(), "[%H:%M:%S] "), sprintf(...))
+  cat(line, "\n", file = prog_log, append = TRUE)
+}
+
+analyse_file <- function(i) {
   fpath  <- all_files$path[i]
   batch  <- all_files$batch[i]
   fname  <- basename(fpath)
   prev   <- get_prev_outcome(fname)
+  n_tot  <- nrow(all_files)
 
-  message(sprintf("[Diag] [%d/%d] %s (%s) — prev: %s",
-                  i, nrow(all_files), fname, batch, prev))
+  log_progress("[%d/%d] START  %s (%s)", i, n_tot, fname, batch)
 
-  entry <- list(
-    path        = fpath,
-    batch       = batch,
-    prev_qc_outcome = prev
-  )
+  entry <- list(path = fpath, batch = batch, prev_qc_outcome = prev)
 
   ff <- tryCatch(
     flowCore::read.FCS(fpath, transformation = FALSE,
@@ -339,36 +368,54 @@ for (i in seq_len(nrow(all_files))) {
   )
 
   if (is.null(ff)) {
-    entry$error   <- "Failed to read FCS file"
+    entry$error      <- "Failed to read FCS file"
     entry$qc_outcome <- "read_error"
-    file_results[[fname]] <- entry
-    next
+    log_progress("[%d/%d] ERROR  %s — could not read FCS", i, n_tot, fname)
+    return(list(name = fname, entry = entry))
   }
 
-  entry$fcs_keywords    <- extract_keywords(ff)
-  entry$n_raw_events    <- nrow(flowCore::exprs(ff))
+  entry$fcs_keywords      <- extract_keywords(ff)
+  entry$n_raw_events      <- nrow(flowCore::exprs(ff))
   entry$per_channel_stats <- channel_stats(ff)
 
-  message(sprintf("         [C] temporal analysis..."))
   entry$temporal_analysis <- tryCatch(
     temporal_analysis(ff),
     error = function(e) list(error = conditionMessage(e))
   )
 
-  message(sprintf("         [D] PeacoQC IQR sweep (9 values)..."))
+  # Suppress PeacoQC's per-file progress bars — they interleave badly across workers
   entry$peacoqc_sweep <- tryCatch(
-    peacoqc_sweep(ff, peacoqc_base, max_pct),
+    suppressMessages(peacoqc_sweep(ff, peacoqc_base, max_pct)),
     error = function(e) list(error = conditionMessage(e))
   )
 
-  message(sprintf("         [E] gate cascade..."))
-  entry$gate_cascade <- gate_cascade(fpath, qc_cfg, fname)
+  entry$gate_cascade <- suppressMessages(gate_cascade(fpath, qc_cfg, fname))
 
-  cascade_reason <- entry$gate_cascade$exclusion_reason %||% "unknown"
+  cascade_reason   <- entry$gate_cascade$exclusion_reason %||% "unknown"
   entry$qc_outcome <- if (grepl("^passed", cascade_reason)) "PASSED" else "EXCLUDED"
 
-  file_results[[fname]] <- entry
+  log_progress("[%d/%d] DONE   %s — %s (n_final=%s)",
+               i, n_tot, fname, entry$qc_outcome,
+               entry$gate_cascade$n_final %||% "NA")
+
+  list(name = fname, entry = entry)
 }
+
+file_results_raw <- mclapply(
+  seq_len(nrow(all_files)),
+  analyse_file,
+  mc.cores       = n_cores,
+  mc.preschedule = FALSE  # dynamic scheduling — excluded files (faster) free cores early
+)
+
+# Collect into named list; NULL results indicate mclapply worker crash
+file_results <- list()
+for (res in file_results_raw) {
+  if (!is.null(res) && !inherits(res, "try-error")) {
+    file_results[[res$name]] <- res$entry
+  }
+}
+log_progress("All %d files processed. Building summary...", nrow(all_files))
 
 # ------------------------------------------------------------------------------
 # Comparison summary
@@ -378,10 +425,14 @@ excluded_names <- names(Filter(function(x) identical(x$qc_outcome, "EXCLUDED"), 
 passing_names  <- names(Filter(function(x) identical(x$qc_outcome, "PASSED"),   file_results))
 
 pull_metric <- function(fname, path_fn) {
-  tryCatch(path_fn(file_results[[fname]]), error = function(e) NA_real_)
+  result <- tryCatch(path_fn(file_results[[fname]]), error = function(e) NA_real_)
+  # NULL access (missing key in error-path gate_cascade) must become NA, not NULL,
+  # so sapply always returns a vector rather than a list.
+  if (is.null(result)) NA_real_ else result
 }
 
 mean_or_null <- function(vals) {
+  if (is.list(vals)) vals <- unlist(vals)
   v <- as.numeric(vals[!is.na(vals)])
   if (length(v) == 0) NULL else round(mean(v), 3)
 }
@@ -406,6 +457,16 @@ excl_dur <- sapply(excluded_names, pull_metric,
 pass_dur <- sapply(passing_names,  pull_metric,
                    path_fn = function(x) x$fcs_keywords$acquisition_duration_sec)
 
+excl_sing <- sapply(excluded_names, pull_metric,
+                    path_fn = function(x) x$gate_cascade$singlet_efficiency_pct)
+pass_sing <- sapply(passing_names,  pull_metric,
+                    path_fn = function(x) x$gate_cascade$singlet_efficiency_pct)
+
+excl_via <- sapply(excluded_names, pull_metric,
+                   path_fn = function(x) x$gate_cascade$pct_viability_removed)
+pass_via <- sapply(passing_names,  pull_metric,
+                   path_fn = function(x) x$gate_cascade$pct_viability_removed)
+
 # Most common exclusion reason in excluded files
 excl_reasons <- sapply(excluded_names,
                        function(n) file_results[[n]]$gate_cascade$exclusion_reason %||% "unknown")
@@ -418,6 +479,51 @@ excl_iqr_min <- sapply(excluded_names, function(n) {
 })
 n_irrecoverable <- sum(is.na(excl_iqr_min))
 
+# Per-batch summary — breakdown by batch for adequacy assessment
+per_batch_summary <- lapply(names(raw_dirs), function(b) {
+  batch_names <- basename(all_files$path[all_files$batch == b])
+  n_total     <- length(batch_names)
+  n_excl      <- sum(batch_names %in% excluded_names)
+  n_pass      <- sum(batch_names %in% passing_names)
+  pass_n      <- intersect(batch_names, passing_names)
+
+  pass_cells <- sapply(pass_n, function(n)
+    file_results[[n]]$gate_cascade$n_final %||% NA_real_)
+  mean_cells <- mean_or_null(pass_cells)
+
+  list(
+    n_files              = n_total,
+    n_excluded           = n_excl,
+    n_passing            = n_pass,
+    pass_rate            = if (n_total > 0) round(n_pass / n_total, 3) else NA_real_,
+    mean_n_final_passing = mean_cells,
+    adequate_for_baseline = isTRUE(n_pass >= 5 && !is.null(mean_cells) && mean_cells >= 5000),
+    mean_pct_peacoqc_removed = mean_or_null(sapply(pass_n, function(n)
+      file_results[[n]]$gate_cascade$pct_peacoqc_removed %||% NA_real_)),
+    mean_singlet_efficiency_pct = mean_or_null(sapply(pass_n, function(n)
+      file_results[[n]]$gate_cascade$singlet_efficiency_pct %||% NA_real_)),
+    mean_pct_viability_removed = mean_or_null(sapply(pass_n, function(n)
+      file_results[[n]]$gate_cascade$pct_viability_removed %||% NA_real_))
+  )
+})
+names(per_batch_summary) <- names(raw_dirs)
+
+# Statistical adequacy projection — answers "can we get defensible ±2SD ranges?"
+baseline_adequacy_projection <- list(
+  note = paste(
+    "n_passing >= 5 per batch and mean_n_final > 5000 are the minimum criteria",
+    "for statistically defensible ±2SD clinical flags.",
+    "adequate_for_baseline = FALSE means the baseline will have wide CIs."
+  ),
+  per_batch = lapply(per_batch_summary, function(b) list(
+    n_passing             = b$n_passing,
+    mean_cells_per_sample = b$mean_n_final_passing,
+    estimated_total_cells = if (!is.null(b$mean_n_final_passing))
+      as.integer(round(b$n_passing * b$mean_n_final_passing)) else NULL,
+    adequate_for_baseline = b$adequate_for_baseline
+  ))
+)
+
 comparison_summary <- list(
   n_files_total   = nrow(all_files),
   n_excluded      = length(excluded_names),
@@ -426,6 +532,8 @@ comparison_summary <- list(
   passing_files   = passing_names,
   exclusion_reasons = as.list(excl_reasons),
   n_irrecoverable_by_peacoqc = n_irrecoverable,
+  per_batch_summary           = per_batch_summary,
+  baseline_adequacy_projection = baseline_adequacy_projection,
   metrics_comparison = list(
     mean_pct_peacoqc_removed = list(
       excluded = mean_or_null(excl_pct_pqc),
@@ -442,6 +550,14 @@ comparison_summary <- list(
     mean_acquisition_duration_sec = list(
       excluded = mean_or_null(excl_dur),
       passing  = mean_or_null(pass_dur)
+    ),
+    mean_singlet_efficiency_pct = list(
+      excluded = mean_or_null(excl_sing),
+      passing  = mean_or_null(pass_sing)
+    ),
+    mean_pct_viability_removed = list(
+      excluded = mean_or_null(excl_via),
+      passing  = mean_or_null(pass_via)
     )
   )
 )
