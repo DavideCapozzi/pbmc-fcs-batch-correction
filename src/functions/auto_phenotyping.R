@@ -27,14 +27,17 @@
 #' @param uninformative_gap numeric(1) Minimum separation between k-means
 #'   centres to consider a marker informative. Default 0.5 arcsinh units.
 #' @return Named numeric vector length n_markers. NA where uninformative.
-compute_adaptive_thresholds <- function(centroid_mat, uninformative_gap = 0.5) {
+compute_adaptive_thresholds <- function(centroid_mat, uninformative_gap = 0.5,
+                                        kmeans_nstart = 10L, kmeans_iter_max = 50L) {
   stopifnot(is.matrix(centroid_mat), nrow(centroid_mat) >= 2L)
 
   apply(centroid_mat, 2L, function(vals) {
     valid <- vals[is.finite(vals)]
     if (length(unique(valid)) < 2L) return(NA_real_)
     km <- tryCatch(
-      kmeans(valid, centers = 2L, nstart = 10L, iter.max = 50L),
+      kmeans(valid, centers = 2L,
+             nstart   = as.integer(kmeans_nstart),
+             iter.max = as.integer(kmeans_iter_max)),
       error = function(e) NULL
     )
     if (is.null(km)) return(NA_real_)
@@ -225,7 +228,9 @@ run_auto_phenotyping <- function(centroids_list,
                                  match_table,
                                  markers                   = NULL,
                                  uninformative_gap         = 0.5,
-                                 low_reliability_threshold = 0.30) {
+                                 low_reliability_threshold = 0.30,
+                                 kmeans_nstart             = 10L,
+                                 kmeans_iter_max           = 50L) {
   stopifnot(
     is.list(centroids_list), length(centroids_list) >= 1L,
     is.data.frame(match_table),
@@ -267,7 +272,9 @@ run_auto_phenotyping <- function(centroids_list,
   }
   global_thresholds <- if (length(global_thr_rows) >= 2L) {
     combined_mat <- do.call(rbind, global_thr_rows)
-    compute_adaptive_thresholds(combined_mat, uninformative_gap)
+    compute_adaptive_thresholds(combined_mat, uninformative_gap,
+                                kmeans_nstart   = kmeans_nstart,
+                                kmeans_iter_max = kmeans_iter_max)
   } else {
     setNames(rep(NA_real_, length(avail_m_global)), avail_m_global)
   }
@@ -353,5 +360,4 @@ run_auto_phenotyping <- function(centroids_list,
   list(report = report, population_labels = population_labels)
 }
 
-# Null-coalescing operator (in case dplyr/rlang not loaded in this module's scope)
-`%||%` <- function(x, y) if (!is.null(x) && length(x) > 0L && !is.na(x[1L])) x else y
+# %||% is defined in src/functions/utils.R — sourced by main.R before all steps.

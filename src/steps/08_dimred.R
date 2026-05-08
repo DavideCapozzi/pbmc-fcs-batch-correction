@@ -28,6 +28,15 @@ out_dir       <- config$directories$processed
 fig_dir       <- config$directories$figures
 umap_cfg      <- config$dimred %||% list(n_neighbors = 15, min_dist = 0.1, seed = 1234)
 
+fig_cfg <- umap_cfg$figure %||% list()
+fig_w_single      <- as.numeric(fig_cfg$width_single      %||% 8)
+fig_h_single      <- as.numeric(fig_cfg$height_single     %||% 6)
+fig_w_comparison  <- as.numeric(fig_cfg$width_comparison  %||% 12)
+fig_h_comparison  <- as.numeric(fig_cfg$height_comparison %||% 6)
+fig_w_matched     <- as.numeric(fig_cfg$width_matched     %||% 11)
+fig_h_matched     <- as.numeric(fig_cfg$height_matched    %||% 8)
+fig_w_per_panel   <- as.numeric(fig_cfg$width_per_panel   %||% 9)
+
 if (!dir.exists(fig_dir)) dir.create(fig_dir, recursive = TRUE)
 
 log_obj <- init_step_log(
@@ -70,7 +79,7 @@ tryCatch({
       sce_pre <- readRDS(in_pre)
       sce_pre <- run_umap_generation(sce_pre, rownames(sce_pre), umap_cfg)
       out_f   <- file.path(fig_dir, "umap_00_pre_qc_by_batch.pdf")
-      plot_umap(sce_pre, "batch", out_f)
+      plot_umap(sce_pre, "batch", out_f, width = fig_w_single, height = fig_h_single)
       umap_files_written <- c(umap_files_written, out_f)
     }
 
@@ -83,20 +92,25 @@ tryCatch({
 
       f1 <- file.path(fig_dir, paste0("umap_01_", b, "_by_batch.pdf"))
       f2 <- file.path(fig_dir, paste0("umap_02_", b, "_metaclusters.pdf"))
-      plot_umap(sce_b_umap, "batch",         f1)
-      plot_umap(sce_b_umap, "metacluster_id", f2)
+      plot_umap(sce_b_umap, "batch",          f1, width = fig_w_single, height = fig_h_single)
+      plot_umap(sce_b_umap, "metacluster_id", f2, width = fig_w_single, height = fig_h_single)
       umap_files_written <- c(umap_files_written, f1, f2)
 
       if ("matched_population_id" %in% names(colData(sce_b_umap))) {
         f3 <- file.path(fig_dir, paste0("umap_03_", b, "_matched_populations.pdf"))
-        plot_umap_matched_populations(sce_b_umap, b, f3, population_labels = population_labels)
+        plot_umap_matched_populations(sce_b_umap, b, f3,
+                                      population_labels = population_labels,
+                                      width = fig_w_matched, height = fig_h_matched)
         umap_files_written <- c(umap_files_written, f3)
       }
     }
 
     if (all(sapply(sce_list, function(s) "matched_population_id" %in% names(colData(s))))) {
       f4 <- file.path(fig_dir, "umap_04_batch_comparison.pdf")
-      plot_umap_batch_comparison(sce_list, f4, population_labels = population_labels)
+      plot_umap_batch_comparison(sce_list, f4,
+                                 population_labels = population_labels,
+                                 width_per_panel = fig_w_per_panel,
+                                 height = fig_h_matched)
       umap_files_written <- c(umap_files_written, f4)
     }
 
@@ -125,20 +139,21 @@ tryCatch({
     sce_pre <- readRDS(in_pre)
     sce_pre <- run_umap_generation(sce_pre, rownames(sce_pre), umap_cfg)
     f1      <- file.path(fig_dir, "umap_01_pre_correction_by_batch.pdf")
-    plot_umap(sce_pre, "batch", f1)
+    plot_umap(sce_pre, "batch", f1, width = fig_w_single, height = fig_h_single)
     umap_files_written <- c(umap_files_written, f1)
 
     sce_post <- readRDS(in_post)
     sce_post <- run_umap_generation(sce_post, rownames(sce_post), umap_cfg)
     f2       <- file.path(fig_dir, "umap_02_post_correction_by_batch.pdf")
     f3       <- file.path(fig_dir, "umap_03_post_correction_split_by_batch.pdf")
-    plot_umap(sce_post, "batch", f2)
-    plot_umap_split(sce_post, "sample_id", "batch", f3)
+    plot_umap(sce_post, "batch", f2, width = fig_w_single, height = fig_h_single)
+    plot_umap_split(sce_post, "sample_id", "batch", f3,
+                    width = fig_w_comparison, height = fig_h_comparison)
     umap_files_written <- c(umap_files_written, f2, f3)
 
     if ("metacluster_id" %in% names(colData(sce_post))) {
       f4 <- file.path(fig_dir, "umap_04_post_correction_clusters.pdf")
-      plot_umap(sce_post, "metacluster_id", f4)
+      plot_umap(sce_post, "metacluster_id", f4, width = fig_w_single, height = fig_h_single)
       umap_files_written <- c(umap_files_written, f4)
     }
 

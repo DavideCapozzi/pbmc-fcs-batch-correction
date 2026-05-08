@@ -8,6 +8,7 @@
 library(flowCore)
 library(dplyr)
 library(stringr)
+library(parallel)
 
 # ------------------------------------------------------------------------------
 # Helper: Semantic Normalizer for Cytometry Markers
@@ -136,7 +137,7 @@ read_single_fcs <- function(file_path, markers_to_keep, cofactor = 5) {
 # Main: Batch Load Directory
 # ------------------------------------------------------------------------------
 read_and_prep_data <- function(data_dirs, cofactor = 5, exclude = NULL, test_mode = FALSE, test_limit = 5,
-                               raw_filters = list(), batch_labels = list()) {
+                               raw_filters = list(), batch_labels = list(), n_workers = 1L) {
 
   all_files_df <- data.frame(file_path = character(), batch_id = character(), stringsAsFactors = FALSE)
 
@@ -163,26 +164,31 @@ read_and_prep_data <- function(data_dirs, cofactor = 5, exclude = NULL, test_mod
   
   shared_markers <- detect_shared_markers(fcs_files, exclude)
   
-  message(sprintf("[IO] Importing data using %d shared markers...", length(shared_markers)))
-  message(sprintf("    -> Markers: %s...", paste(head(shared_markers, 5), collapse=", ")))
-  
-  data_list <- lapply(seq_along(fcs_files), function(i) {
-    f <- fcs_files[i]
+  message(sprintf("[IO] Importing data using %d shared markers (workers: %d)...",
+                  length(shared_markers), n_workers))
+  message(sprintf("    -> Markers: %s...", paste(head(shared_markers, 5), collapse = ", ")))
+
+  .read_worker <- function(i) {
+    f    <- fcs_files[i]
     b_id <- all_files_df$batch_id[i]
-    
+
     df <- read_single_fcs(f, shared_markers, cofactor)
-    
     if (is.null(df)) return(NULL)
-    
-    message(sprintf("    -> [%d/%d] SUCCESS: %s | Batch: %s | Events: %d", 
+
+    message(sprintf("    -> [%d/%d] SUCCESS: %s | Batch: %s | Events: %d",
                     i, length(fcs_files), basename(f), b_id, nrow(df)))
-    
+
     df$sample_id <- basename(f)
     df$batch     <- batch_labels[[b_id]] %||% b_id
-    
-    return(df)
-  })
-  
+    df
+  }
+
+  # pipeline_lapply is sourced by main.R via parallel_utils.R.
+  # When called standalone, fall back to lapply.
+  loader <- if (exists("pipeline_lapply", mode = "function")) pipeline_lapply else lapply
+  data_list <- loader(seq_along(fcs_files), .read_worker, n_workers = n_workers)
+
+  stopifnot(length(data_list) == length(fcs_files))
   data_list <- data_list[!sapply(data_list, is.null)]
   if (length(data_list) == 0) stop("[IO Fatal] All files failed to import.")
   

@@ -17,8 +17,11 @@ suppressPackageStartupMessages({
   library(yaml)
   library(flowCore)
   library(PeacoQC)
+  library(parallel)
 })
 
+source("src/functions/utils.R")
+source("src/functions/parallel_utils.R")
 source("src/functions/qc.R")
 source("src/functions/step_logger.R")
 
@@ -65,8 +68,9 @@ if (is.null(all_files_df) || nrow(all_files_df) == 0L) {
   stop("[Step 01 Fatal] No FCS files found across any batch directory.")
 }
 
-message(sprintf("[Step 01] Files to process: %d across %d batch(es)",
-                nrow(all_files_df), length(unique(all_files_df$batch_id))))
+n_workers <- get_n_workers(config)
+message(sprintf("[Step 01] Files to process: %d across %d batch(es) — using %d worker(s)",
+                nrow(all_files_df), length(unique(all_files_df$batch_id)), n_workers))
 
 log_obj <- init_step_log(
   step_name   = "01_qc",
@@ -74,17 +78,13 @@ log_obj <- init_step_log(
   input_files = all_files_df$file_path
 )
 
-# Per-sample QC loop
-qc_filters      <- vector("list", nrow(all_files_df))
-names(qc_filters) <- basename(all_files_df$file_path)
-qc_summary_list <- list()
-
-for (i in seq_len(nrow(all_files_df))) {
+# Worker function — called once per FCS file (independent, no shared state)
+.qc_worker <- function(i) {
   fp  <- all_files_df$file_path[i]
   sid <- basename(fp)
   bid <- all_files_df$batch_id[i]
 
-  message(sprintf("[Step 01] [%d/%d] [%s] %s", i, nrow(all_files_df), bid, sid))
+  message(sprintf("[Step 01] [%s] Processing: %s", bid, sid))
 
   result <- tryCatch(
     run_sample_qc(fp, qc_config = qc_cfg, sample_id = sid),
@@ -94,6 +94,32 @@ for (i in seq_len(nrow(all_files_df))) {
       NULL
     }
   )
+
+  if (!is.null(result)) {
+    message(sprintf("         [%s] n_raw=%d  n_final=%d  (%.1f%% removed)",
+                    sid, result$qc_metrics$n_raw, result$qc_metrics$n_final,
+                    result$qc_metrics$pct_total_removed))
+  }
+
+  list(sid = sid, bid = bid, fp = fp, result = result)
+}
+
+raw_results <- pipeline_lapply(seq_len(nrow(all_files_df)), .qc_worker, n_workers = n_workers)
+
+# Re-order results by original file order (canonical deterministic ordering)
+result_sids <- vapply(raw_results, `[[`, character(1L), "sid")
+raw_results  <- raw_results[match(basename(all_files_df$file_path), result_sids)]
+
+# Collect into named lists
+qc_filters      <- vector("list", nrow(all_files_df))
+names(qc_filters) <- basename(all_files_df$file_path)
+qc_summary_list <- list()
+
+for (item in raw_results) {
+  sid    <- item$sid
+  bid    <- item$bid
+  fp     <- item$fp
+  result <- item$result
 
   if (is.null(result)) {
     qc_filters[[sid]] <- NULL
@@ -107,11 +133,6 @@ for (i in seq_len(nrow(all_files_df))) {
     file_path     = fp
   )
   qc_summary_list[[sid]] <- result$qc_metrics
-
-  message(sprintf("         n_raw=%d  n_final=%d  (%.1f%% removed)",
-                  result$qc_metrics$n_raw,
-                  result$qc_metrics$n_final,
-                  result$qc_metrics$pct_total_removed))
 }
 
 n_processed      <- length(qc_filters)

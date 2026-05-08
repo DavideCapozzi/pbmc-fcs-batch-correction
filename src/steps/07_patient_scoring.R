@@ -48,6 +48,13 @@ tryCatch({
   match_table   <- readRDS(req_files["match"])
   patient_freq  <- readRDS(req_files["patients"])$freq_matrix
 
+  required_baseline_cols <- c("batch", "population", "mean_freq", "sd_freq")
+  missing_cols <- setdiff(required_baseline_cols, colnames(baseline_dict))
+  if (length(missing_cols) > 0L) {
+    stop(sprintf("[Step 07] baseline_dict is missing required columns: %s",
+                 paste(missing_cols, collapse = ", ")))
+  }
+
   z_thresh <- as.numeric(config$scoring$z_score_threshold %||% 2.0)
   message(sprintf("[Step 07] Z-threshold: +/- %.1f", z_thresh))
 

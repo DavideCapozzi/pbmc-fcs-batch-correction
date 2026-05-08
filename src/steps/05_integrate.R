@@ -54,6 +54,14 @@ tryCatch({
   match_table    <- readRDS(required_files["match_file"])
   centroids_list <- readRDS(required_files["centroids_file"])
 
+  fm_check <- freq_result$freq_matrix
+  if (is.null(fm_check) || nrow(fm_check) == 0L) {
+    stop("[Step 05] frequency_matrix.rds is empty. Run Step 04 first.")
+  }
+  if (!all(c("sample_id", "batch") %in% colnames(fm_check))) {
+    stop("[Step 05] frequency_matrix is missing required columns: sample_id, batch.")
+  }
+
   # --- AUTO-PHENOTYPING ---
   source("src/functions/auto_phenotyping.R")
   message("[Step 05] Running auto-phenotyping on matched population centroids...")
@@ -63,7 +71,9 @@ tryCatch({
       match_table               = match_table,
       markers                   = colnames(centroids_list[[names(centroids_list)[1L]]]),
       uninformative_gap         = as.numeric(config$auto_phenotyping$uninformative_gap %||% 0.5),
-      low_reliability_threshold = as.numeric(config$auto_phenotyping$low_reliability_threshold %||% 0.30)
+      low_reliability_threshold = as.numeric(config$auto_phenotyping$low_reliability_threshold %||% 0.30),
+      kmeans_nstart             = as.integer(config$auto_phenotyping$kmeans$nstart  %||% 10L),
+      kmeans_iter_max           = as.integer(config$auto_phenotyping$kmeans$iter_max %||% 50L)
     ),
     error = function(e) {
       warning(sprintf("[Step 05] Auto-phenotyping failed: %s — continuing without labels.",

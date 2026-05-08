@@ -14,6 +14,7 @@ rm(list = ls())
 suppressPackageStartupMessages({
   library(yaml)
   library(tools)
+  library(parallel)
 })
 
 # 2. Configuration & Logging Setup
@@ -21,7 +22,12 @@ suppressPackageStartupMessages({
 config_path <- "config/global_params.yml"
 if (!file.exists(config_path)) stop("[Main] FATAL: Config file not found at ", config_path)
 
-config <- read_yaml(config_path)
+# Source shared utilities before anything else — defines %||%, safe_div, etc.
+source("src/functions/utils.R")
+source("src/functions/config_validator.R")
+source("src/functions/parallel_utils.R")
+
+config <- validate_config(read_yaml(config_path))
 
 # Define Output Structure
 out_root <- config$directories$logs
@@ -48,9 +54,9 @@ run_pipeline_step <- function(script_rel_path) {
   script_name <- basename(script_rel_path)
   
   # Log Header
-  cat(paste0("\n", strrep("=", 60), "\n"))
-  cat(sprintf(">>> STARTING STEP: %s\n", script_name))
-  cat(paste0(strrep("=", 60), "\n"))
+  message(paste0("\n", strrep("=", 60)))
+  message(sprintf(">>> STARTING STEP: %s", script_name))
+  message(strrep("=", 60))
   
   start_time <- Sys.time()
   
@@ -68,7 +74,7 @@ run_pipeline_step <- function(script_rel_path) {
   end_time <- Sys.time()
   duration <- round(difftime(end_time, start_time, units = "secs"), 1)
   
-  cat(sprintf("\n>>> SUCCESS: %s completed in %s seconds.\n", script_name, duration))
+  message(sprintf("\n>>> SUCCESS: %s completed in %s seconds.", script_name, duration))
 }
 
 # 4. Execution Block
@@ -130,17 +136,17 @@ tryCatch({
   run_pipeline_step("src/steps/08_dimred.R")
 
   # Final Success Message
-  cat("\n==================================================\n")
-  cat(sprintf("PIPELINE FINISHED SUCCESSFULLY at %s\n", Sys.time()))
-  cat("==================================================\n")
+  message("\n==================================================")
+  message(sprintf("PIPELINE FINISHED SUCCESSFULLY at %s", Sys.time()))
+  message("==================================================")
   
 }, error = function(e) {
   
   # Handle Critical Failures
-  cat("\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n")
-  cat("[FATAL ERROR] Pipeline stopped unexpectedly.\n")
-  cat("Error Message: ", e$message, "\n")
-  cat("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n")
+  message("\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+  message("[FATAL ERROR] Pipeline stopped unexpectedly.")
+  message("Error Message: ", e$message)
+  message("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
   
   # We don't stop() here because we want the 'finally' block to run cleanly
   

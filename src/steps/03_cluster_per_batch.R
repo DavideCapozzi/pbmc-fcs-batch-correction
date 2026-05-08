@@ -46,9 +46,17 @@ log_obj <- init_step_log(
 tryCatch({
 
   sce_full <- readRDS(in_file)
-  markers  <- rownames(sce_full)
-  batches  <- sort(unique(as.character(sce_full$batch)))
 
+  if (ncol(sce_full) == 0L) stop("[Step 03] filtered_sce.rds contains zero cells.")
+  batches <- sort(unique(as.character(sce_full$batch)))
+  if (length(batches) < 2L) {
+    stop(sprintf(
+      "[Step 03] At least 2 batches required for cluster matching; found: %s",
+      paste(batches, collapse = ", ")
+    ))
+  }
+
+  markers  <- rownames(sce_full)
   message(sprintf("[Step 03] Detected %d batch(es): %s", length(batches), paste(batches, collapse = ", ")))
   message(sprintf("[Step 03] Markers: %s", paste(markers, collapse = ", ")))
 

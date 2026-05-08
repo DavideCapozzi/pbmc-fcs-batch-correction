@@ -431,5 +431,4 @@ run_sample_qc <- function(file_path, qc_config, sample_id = NULL) {
   )
 }
 
-# Null-coalescing operator (in case dplyr is not loaded in this module's scope)
-`%||%` <- function(x, y) if (!is.null(x)) x else y
+# %||% is defined in src/functions/utils.R — sourced by main.R before all steps.

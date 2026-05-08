@@ -67,15 +67,15 @@ run_umap_generation <- function(sce, markers, config) {
 #' @param sce SCE object with UMAP computed.
 #' @param color_by String, column name in colData to color by.
 #' @param out_path String, path to save the PDF.
-plot_umap <- function(sce, color_by, out_path) {
-  
+plot_umap <- function(sce, color_by, out_path, width = 8, height = 6) {
+
   message(sprintf("[DimRed] Plotting UMAP colored by %s...", color_by))
-  
+
   p <- scater::plotReducedDim(sce, dimred = "UMAP", colour_by = color_by) +
     ggplot2::theme_minimal() +
     ggplot2::ggtitle(paste("UMAP colored by", color_by))
-  
-  ggplot2::ggsave(out_path, plot = p, width = 8, height = 6)
+
+  ggplot2::ggsave(out_path, plot = p, width = width, height = height)
 }
 
 #' @title Plot UMAP Split by Variable
@@ -84,18 +84,17 @@ plot_umap <- function(sce, color_by, out_path) {
 #' @param color_by String, column name in colData to color by.
 #' @param split_by String, column name in colData to facet by.
 #' @param out_path String, path to save the PDF.
-plot_umap_split <- function(sce, color_by, split_by, out_path) {
-  
+plot_umap_split <- function(sce, color_by, split_by, out_path, width = 12, height = 6) {
+
   message(sprintf("[DimRed] Plotting UMAP colored by %s and split by %s...", color_by, split_by))
-  
+
   # 'other_fields' is strictly required to pass the facet variable to scater's internal dataframe
   p <- scater::plotReducedDim(sce, dimred = "UMAP", colour_by = color_by, other_fields = split_by) +
     ggplot2::theme_minimal() +
     ggplot2::facet_wrap(as.formula(paste("~", split_by))) +
     ggplot2::ggtitle(paste("UMAP colored by", color_by, "| Split by", split_by))
-  
-  # Extended width to prevent squished panels in PDF
-  ggplot2::ggsave(out_path, plot = p, width = 12, height = 6)
+
+  ggplot2::ggsave(out_path, plot = p, width = width, height = height)
 }
 
 #' @title Plot UMAP Colored by Matched Population
@@ -107,7 +106,8 @@ plot_umap_split <- function(sce, color_by, split_by, out_path) {
 #' @param out_path Path to save PDF.
 #' @param population_labels Named list mapping pop_id → biological label string, or NULL.
 plot_umap_matched_populations <- function(sce, batch_id, out_path,
-                                          population_labels = NULL) {
+                                          population_labels = NULL,
+                                          width = 11, height = 8) {
 
   message(sprintf("[DimRed] Plotting matched-population UMAP for batch: %s", batch_id))
 
@@ -151,7 +151,7 @@ plot_umap_matched_populations <- function(sce, batch_id, out_path,
     ggplot2::guides(colour = ggplot2::guide_legend(override.aes = list(size = 3, alpha = 1))) +
     ggplot2::ggtitle(paste("Matched Populations —", batch_id))
 
-  ggplot2::ggsave(out_path, plot = p, width = 11, height = 8)
+  ggplot2::ggsave(out_path, plot = p, width = width, height = height)
 }
 
 #' @title Plot Side-by-Side UMAP for Both Batches
@@ -162,7 +162,8 @@ plot_umap_matched_populations <- function(sce, batch_id, out_path,
 #' @param out_path Path to save PDF.
 #' @param population_labels Named list mapping pop_id → biological label string, or NULL.
 plot_umap_batch_comparison <- function(sce_list, out_path,
-                                       population_labels = NULL) {
+                                       population_labels = NULL,
+                                       width_per_panel = 9, height = 8) {
 
   message("[DimRed] Generating side-by-side batch comparison UMAP...")
 
@@ -227,5 +228,5 @@ plot_umap_batch_comparison <- function(sce_list, out_path,
     patchwork::plot_annotation(title = "Cross-Batch Matched Population Comparison")
 
   ggplot2::ggsave(out_path, plot = combined,
-                  width = 9 * length(sce_list), height = 8)
+                  width = width_per_panel * length(sce_list), height = height)
 }

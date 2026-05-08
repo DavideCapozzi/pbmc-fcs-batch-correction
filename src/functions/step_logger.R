@@ -57,6 +57,19 @@ finalize_step_log <- function(log_obj, output_files, status = "SUCCESS") {
   invisible(log_obj)
 }
 
+#' Log an informational message to console and accumulate in the step log.
+#' @param log_obj environment from init_step_log()
+#' @param msg character(1) message text
+#' @return invisible(log_obj)
+log_info <- function(log_obj, msg) {
+  message(msg)
+  if (is.environment(log_obj)) {
+    if (is.null(log_obj$messages)) log_obj$messages <- character(0L)
+    log_obj$messages <- c(log_obj$messages, as.character(msg))
+  }
+  invisible(log_obj)
+}
+
 #' Serialize the log to a JSON file in logs_dir/steps/.
 #' File name: {NN}_{step_name}_{run_id}.json
 #' @param log_obj finalized environment

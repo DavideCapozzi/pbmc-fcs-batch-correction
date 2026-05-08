@@ -143,7 +143,8 @@ match_metaclusters <- function(centroids_list, markers, similarity_threshold = 0
 #' @return List: $summary (data.frame with delta + JSD columns), $jsd_values
 #'   (named numeric), $unmatched_clusters (data.frame).
 validate_cluster_matches <- function(match_table, centroids_list, markers,
-                                     delta_threshold = 2.0) {
+                                     delta_threshold = 2.0,
+                                     jsd_threshold   = 0.1) {
 
   softmax <- function(x) {
     x <- x - max(x, na.rm = TRUE)
@@ -202,7 +203,7 @@ validate_cluster_matches <- function(match_table, centroids_list, markers,
       marker_with_max_delta = marker_max,
       delta_pass            = !is.na(max_delta) && max_delta < delta_threshold,
       jsd                   = jsd_val,
-      jsd_pass              = !is.na(jsd_val) && jsd_val < 0.1,
+      jsd_pass              = !is.na(jsd_val) && jsd_val < jsd_threshold,
       stringsAsFactors      = FALSE
     )
   }

@@ -57,18 +57,23 @@ run_flowsom_clustering <- function(sce, markers, config) {
   # 4. Metaclustering
   message(sprintf("[Clustering] Consensus Metaclustering into %d populations...", k_val))
   
+  consensus_cfg <- config$consensus %||% list()
+  reps_val      <- as.integer(consensus_cfg$reps     %||% 100L)
+  pItem_val     <- as.numeric(consensus_cfg$pItem    %||% 0.9)
+  pFeature_val  <- as.numeric(consensus_cfg$pFeature %||% 1.0)
+
   meta_clustering <- tryCatch({
     suppressMessages(
       ConsensusClusterPlus::ConsensusClusterPlus(
         t(fsom$map$codes),
-        maxK = k_val,
-        reps = 100, 
-        pItem = 0.9, 
-        pFeature = 1, 
-        title = tempdir(), 
-        plot = "png", 
-        verbose = FALSE,
-        seed = seed_val
+        maxK     = k_val,
+        reps     = reps_val,
+        pItem    = pItem_val,
+        pFeature = pFeature_val,
+        title    = tempdir(),
+        plot     = "png",
+        verbose  = FALSE,
+        seed     = seed_val
       )
     )
   }, error = function(e) stop("Metaclustering failed: ", e$message))

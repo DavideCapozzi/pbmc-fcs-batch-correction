@@ -6,6 +6,10 @@ project_id: "PBMC_105_Correction"
 random_seed: 42
 n_cores: 4
 
+parallel:
+  n_workers: null        # null = auto-detect (min of n_cores and detectCores()-1)
+  sequential_debug: false  # override via env var PIPELINE_SEQUENTIAL=1
+
 # Directory Structure
 directories:
   raw:
@@ -89,6 +93,10 @@ clustering:
   n_metaclusters: 20
   seed: 1234
   run_per_batch: true
+  consensus:
+    reps: 100        # ConsensusClusterPlus resampling iterations
+    pItem: 0.9       # fraction of items resampled per iteration
+    pFeature: 1.0    # fraction of features resampled per iteration
 
 integration:
   method: "random_effects"
@@ -97,11 +105,15 @@ integration:
   n_bootstrap: 1000
   max_marker_delta_arcsinh: 2.0   # delta_pass = TRUE if max per-marker |Δ| < this threshold
   max_population_freq_warning: 0.40  # Warn if mean_freq > 40% in any (batch, population)
+  jsd_pass_threshold: 0.1        # JSD < this value is considered a passing match (legacy metric)
   
 auto_phenotyping:
   enabled: true
   uninformative_gap: 0.5          # Min k-means center separation to consider a marker informative
   low_reliability_threshold: 0.30 # Append "[low confidence]" when reliability < this value
+  kmeans:
+    nstart: 10     # number of random restarts for 1D k-means
+    iter_max: 50   # maximum iterations per k-means run
 
 scoring:
   run_patient_scoring: true
@@ -111,6 +123,15 @@ dimred:
   n_neighbors: 15
   min_dist: 0.1
   seed: 1234
+  max_cells: 100000  # stratified downsampling cap before UMAP (per-batch)
+  figure:
+    width_single: 8        # width (inches) for single-variable UMAP PDFs
+    height_single: 6
+    width_comparison: 12   # width for split/faceted UMAP PDFs
+    height_comparison: 6
+    width_matched: 11      # width for matched-population single-batch UMAPs
+    height_matched: 8
+    width_per_panel: 9     # width per panel for batch-comparison UMAPs
 
 batch_labels:
   ds_old: "pannelli_liquidi"   # merge DS old into the same batch as TEX pannelli

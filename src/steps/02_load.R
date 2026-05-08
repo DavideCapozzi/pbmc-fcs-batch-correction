@@ -17,6 +17,8 @@ suppressPackageStartupMessages({
   library(SingleCellExperiment)
 })
 
+source("src/functions/utils.R")
+source("src/functions/parallel_utils.R")
 source("src/functions/fcs_io.R")
 source("src/functions/step_logger.R")
 
@@ -52,6 +54,7 @@ tryCatch({
 
   is_test  <- isTRUE(config$testing$enabled)
   test_lim <- as.integer(config$testing$max_files_per_panel %||% 5L)
+  n_workers <- get_n_workers(config)
 
   cell_tbl <- read_and_prep_data(
     data_dirs    = raw_dir,
@@ -60,7 +63,8 @@ tryCatch({
     test_mode    = is_test,
     test_limit   = test_lim,
     raw_filters  = config$directories$raw_filters  %||% list(),
-    batch_labels = config$batch_labels             %||% list()
+    batch_labels = config$batch_labels             %||% list(),
+    n_workers    = n_workers
   )
 
   n_cells_raw <- nrow(cell_tbl)
@@ -92,7 +96,11 @@ tryCatch({
     add_metric(log_obj, "n_cells_after_qc_filter", n_after)
     add_metric(log_obj, "pct_qc_removed",           round(pct_removed, 2))
   } else {
-    message("[Step 02] No QC filters found — loading all events (run Step 01 first for QC).")
+    warning(
+      "[Step 02] qc_cell_filters.rds not found — loading ALL events without QC filtering.\n",
+      "          Run Step 01 (01_qc.R) first to apply per-sample cell filters.",
+      call. = FALSE
+    )
     add_metric(log_obj, "n_cells_after_qc_filter", n_cells_raw)
   }
 

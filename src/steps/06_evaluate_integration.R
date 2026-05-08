@@ -14,6 +14,7 @@ suppressPackageStartupMessages({
   library(writexl)
 })
 
+source("src/functions/utils.R")
 source("src/functions/cluster_matching.R")
 source("src/functions/step_logger.R")
 
@@ -52,9 +53,11 @@ tryCatch({
 
   # Metric 1: Per-marker delta (primary) + JSD (secondary) per matched pair
   delta_threshold <- as.numeric(config$integration$max_marker_delta_arcsinh %||% 2.0)
+  jsd_threshold   <- as.numeric(config$integration$jsd_pass_threshold        %||% 0.1)
   message("[Step 06] Computing per-marker delta and JSD per matched pair...")
   validation           <- validate_cluster_matches(match_table, centroids_list, markers,
-                                                    delta_threshold = delta_threshold)
+                                                    delta_threshold = delta_threshold,
+                                                    jsd_threshold   = jsd_threshold)
   cluster_match_report <- validation$summary
 
   n_jsd_pass        <- 0L
@@ -75,15 +78,14 @@ tryCatch({
   cv_threshold <- as.numeric(config$integration$cv_flag_threshold %||% 1.5)
 
   cv_table         <- baseline_dict
-  cv_table$cv      <- cv_table$sd_freq / cv_table$mean_freq
+  cv_table$cv      <- safe_div(cv_table$sd_freq, cv_table$mean_freq, default = NA_real_)
   cv_table$cv_flag <- !is.na(cv_table$cv) & cv_table$cv > cv_threshold
 
-  zero_mean_n <- sum(!is.finite(cv_table$cv), na.rm = TRUE)
+  zero_mean_n <- sum(is.na(cv_table$cv), na.rm = TRUE)
   if (zero_mean_n > 0) {
-    message(sprintf("[Step 06] %d strata with mean_freq = 0 (CV undefined): excluded.",
+    message(sprintf("[Step 06] %d strata with mean_freq ~ 0 (CV undefined): set to NA.",
                     zero_mean_n))
   }
-  cv_table$cv[!is.finite(cv_table$cv)] <- NA_real_
   cv_table$cv_flag[is.na(cv_table$cv)] <- NA
 
   n_flagged <- sum(cv_table$cv_flag, na.rm = TRUE)

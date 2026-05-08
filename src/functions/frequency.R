@@ -52,6 +52,8 @@ compute_population_frequencies <- function(sce_list, match_table) {
       cells_s     <- cell_df[cell_df$sample_id == s, ]
       total_cells <- nrow(cells_s)
 
+      stopifnot(total_cells > 0L)
+
       count_row <- setNames(
         as.list(rep(0L, length(matched_pop_ids))),
         pop_cols
