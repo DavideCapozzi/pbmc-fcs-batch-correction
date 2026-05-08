@@ -111,11 +111,11 @@ for (i in seq_len(nrow(all_files_df))) {
                   result$qc_metrics$pct_total_removed))
 }
 
-n_processed <- sum(!sapply(qc_filters, is.null))
-n_excluded  <- sum( sapply(qc_filters, is.null))
+n_processed      <- length(qc_filters)
+n_excluded       <- nrow(all_files_df) - n_processed
+passing_sids     <- names(qc_filters)
 mean_pct_removed <- mean(
-  sapply(qc_summary_list[!sapply(qc_filters, is.null)],
-         function(x) x$pct_total_removed),
+  sapply(qc_summary_list[passing_sids], function(x) x$pct_total_removed),
   na.rm = TRUE
 )
 

@@ -18,8 +18,8 @@ directories:
   integration: "results/integration"
 
 testing:
-  enabled: true
-  max_files_per_panel: 10
+  enabled: false
+  max_files_per_panel: 30
 
 # Marker Configuration
 markers:
@@ -50,7 +50,7 @@ qc:
   peacoqc:
     enabled: true
     MAD: 6
-    IT_limit: 0.6
+    IT_limit: 0.8
     remove_zeros: false
     min_cells: 150
     max_pct_per_step: 0.60          # Trigger retry if PeacoQC removes > 60% of events

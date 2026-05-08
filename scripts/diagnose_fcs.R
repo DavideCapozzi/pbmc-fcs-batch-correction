@@ -208,7 +208,13 @@ peacoqc_sweep <- function(ff, base_cfg, max_pct_removed = 85) {
     if (passes && is.na(min_passing)) min_passing <- it
   }
 
-  results$it_min_passing <- if (is.na(min_passing)) NULL else min_passing
+  valid_pcts <- sapply(results, function(r) r$pct_removed)
+  valid_pcts <- as.numeric(valid_pcts[!is.na(valid_pcts)])
+  it_removal_range_pct <- if (length(valid_pcts) >= 2) round(max(valid_pcts) - min(valid_pcts), 3) else NA_real_
+
+  results$it_min_passing       <- if (is.na(min_passing)) NULL else min_passing
+  results$it_removal_range_pct <- if (is.na(it_removal_range_pct)) NULL else it_removal_range_pct
+  results$it_recoverable       <- isTRUE(!is.na(it_removal_range_pct) && it_removal_range_pct >= 10)
   results
 }
 
@@ -221,7 +227,8 @@ gate_cascade <- function(file_path, qc_config, sample_id) {
   min_cells <- as.integer(qc_config$min_cells_final %||% 5000L)
 
   result <- tryCatch({
-    qc_res <- run_sample_qc(file_path, qc_config, sample_id)
+    qc_config_permissive <- modifyList(qc_config, list(max_pct_removed = 100))
+    qc_res <- run_sample_qc(file_path, qc_config_permissive, sample_id)
     m      <- qc_res$qc_metrics
     n_fin  <- m$n_final
     pct_tot <- round(100 * (1 - n_fin / m$n_raw), 3)
@@ -476,7 +483,8 @@ excl_it_min <- sapply(excluded_names, function(n) {
   v  <- sw$it_min_passing
   if (is.null(v)) NA_real_ else as.numeric(v)
 })
-n_irrecoverable <- sum(is.na(excl_it_min))
+n_irrecoverable <- sum(!sapply(excluded_names, function(n)
+  isTRUE(file_results[[n]]$peacoqc_sweep$it_recoverable)))
 
 # Per-batch summary — breakdown by batch for adequacy assessment
 per_batch_summary <- lapply(names(raw_dirs), function(b) {
