@@ -9,7 +9,7 @@
 #   [A] FCS header keywords (instrument, acquisition timing, channel count)
 #   [B] Per-channel statistics on raw events (mean, SD, saturation, negatives)
 #   [C] Temporal analysis — event flow stability and per-channel drift scores
-#   [D] PeacoQC IQR sweep — tests IQR_multiplier 1.5 → 8.0 to find the minimum
+#   [D] PeacoQC IT_limit sweep — tests IT_limit 0.3 → 1.0 to find the minimum
 #       value that keeps removal below the exclusion threshold
 #   [E] Full gate cascade (PeacoQC → singlet → debris → viability) with
 #       per-step cell counts and the final exclusion reason
@@ -179,16 +179,16 @@ temporal_analysis <- function(ff, n_bins = 20L) {
 }
 
 # ------------------------------------------------------------------------------
-# [D] PeacoQC IQR sweep
+# [D] PeacoQC IT_limit sweep
 # ------------------------------------------------------------------------------
 
 peacoqc_sweep <- function(ff, base_cfg, max_pct_removed = 85) {
-  iqr_values <- c(1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0)
-  results    <- list()
+  it_values   <- c(0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+  results     <- list()
   min_passing <- NA_real_
 
-  for (iqr in iqr_values) {
-    cfg_i <- modifyList(base_cfg, list(IQR_multiplier = iqr))
+  for (it in it_values) {
+    cfg_i <- modifyList(base_cfg, list(IT_limit = it))
     res   <- tryCatch(
       apply_peacoqc_filter(ff, channels_to_use = NULL, peacoqc_params = cfg_i),
       error = function(e) list(pct_removed = NA_real_, n_after = NA_integer_)
@@ -197,18 +197,18 @@ peacoqc_sweep <- function(ff, base_cfg, max_pct_removed = 85) {
     surv   <- if (!is.null(res$n_after)) as.integer(res$n_after) else NA_integer_
     passes <- !is.na(pct) && pct < max_pct_removed
 
-    key  <- paste0("iqr_", gsub("\\.", "_", as.character(iqr)))
+    key  <- paste0("it_", gsub("\\.", "_", as.character(it)))
     results[[key]] <- list(
-      iqr_multiplier = iqr,
-      pct_removed    = pct,
-      n_surviving    = surv,
-      passes         = passes
+      IT_limit    = it,
+      pct_removed = pct,
+      n_surviving = surv,
+      passes      = passes
     )
 
-    if (passes && is.na(min_passing)) min_passing <- iqr
+    if (passes && is.na(min_passing)) min_passing <- it
   }
 
-  results$iqr_min_passing <- if (is.na(min_passing)) NULL else min_passing
+  results$it_min_passing <- if (is.na(min_passing)) NULL else min_passing
   results
 }
 
@@ -247,7 +247,7 @@ gate_cascade <- function(file_path, qc_config, sample_id) {
       pct_debris_removed   = round(m$pct_debris_removed     %||% NA_real_, 2),
       pct_viability_removed = round(m$pct_viability_removed %||% NA_real_, 2),
       pct_total_removed    = pct_tot,
-      peacoqc_iqr_used     = m$peacoqc_iqr_used %||% NA_real_,
+      peacoqc_IT_limit_used = m$peacoqc_IT_limit_used %||% NA_real_,
       peacoqc_retry_triggered = isTRUE(m$peacoqc_retry_triggered),
       viability_channel    = m$viability_channel_raw %||% NA_character_,
       viability_threshold  = m$viability_threshold   %||% NA_real_,
@@ -285,8 +285,7 @@ config     <- yaml::read_yaml("config/global_params.yml")
 qc_cfg     <- config$qc
 max_pct    <- as.numeric(qc_cfg$max_pct_removed %||% 85)
 peacoqc_base <- qc_cfg$peacoqc %||% list(
-  remove_margins = TRUE, use_IQR_outlier_detection = TRUE,
-  IQR_multiplier = 3.5, min_cells = 150L
+  MAD = 6, IT_limit = 0.6, remove_zeros = FALSE, min_cells = 150L
 )
 
 # Output path
@@ -471,13 +470,13 @@ pass_via <- sapply(passing_names,  pull_metric,
 excl_reasons <- sapply(excluded_names,
                        function(n) file_results[[n]]$gate_cascade$exclusion_reason %||% "unknown")
 
-# IQR min passing across excluded files (NULL means irrecoverable)
-excl_iqr_min <- sapply(excluded_names, function(n) {
+# IT_limit min passing across excluded files (NULL means irrecoverable)
+excl_it_min <- sapply(excluded_names, function(n) {
   sw <- file_results[[n]]$peacoqc_sweep
-  v  <- sw$iqr_min_passing
+  v  <- sw$it_min_passing
   if (is.null(v)) NA_real_ else as.numeric(v)
 })
-n_irrecoverable <- sum(is.na(excl_iqr_min))
+n_irrecoverable <- sum(is.na(excl_it_min))
 
 # Per-batch summary — breakdown by batch for adequacy assessment
 per_batch_summary <- lapply(names(raw_dirs), function(b) {
@@ -566,7 +565,8 @@ comparison_summary <- list(
 report <- list(
   report_generated = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"),
   config = list(
-    iqr_multiplier    = as.numeric(peacoqc_base$IQR_multiplier %||% 3.5),
+    IT_limit          = as.numeric(peacoqc_base$IT_limit %||% 0.6),
+    MAD               = as.numeric(peacoqc_base$MAD %||% 6),
     max_pct_removed   = max_pct,
     min_cells_final   = as.integer(qc_cfg$min_cells_final %||% 5000L),
     batches           = names(raw_dirs)

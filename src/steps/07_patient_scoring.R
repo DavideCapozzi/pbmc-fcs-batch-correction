@@ -24,8 +24,7 @@ int_out_dir <- config$directories$integration %||% "results/integration"
 
 if (!isTRUE(config$scoring$run_patient_scoring)) {
   message("[Step 07] scoring.run_patient_scoring is FALSE — skipping.")
-  quit(save = "no", status = 0)
-}
+} else {
 
 req_files <- c(
   baseline = file.path(out_dir, "stratified_baseline_dictionary.rds"),
@@ -95,3 +94,4 @@ tryCatch({
   write_step_json(log_obj, config$directories$logs)
   stop(paste("[Step 07 Fatal]", e$message), call. = FALSE)
 })
+} # end if (isTRUE(config$scoring$run_patient_scoring))

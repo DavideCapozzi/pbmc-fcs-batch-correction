@@ -8,8 +8,7 @@
 # 1. Environment Setup
 # ------------------------------------------------------------------------------
 # Clean global environment to simulate a fresh start (Best effort isolation)
-rm(list = ls()) 
-graphics.off()
+rm(list = ls())
 
 # Load essential libraries for the orchestrator
 suppressPackageStartupMessages({

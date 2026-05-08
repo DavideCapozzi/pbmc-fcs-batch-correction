@@ -59,10 +59,10 @@ apply_peacoqc_filter <- function(
     flowframe,
     channels_to_use  = NULL,
     peacoqc_params   = list(
-      remove_margins             = TRUE,
-      use_IQR_outlier_detection  = TRUE,
-      IQR_multiplier             = 1.5,
-      min_cells                  = 150
+      MAD          = 6,
+      IT_limit     = 0.6,
+      remove_zeros = FALSE,
+      min_cells    = 150
     )
 ) {
   if (!requireNamespace("PeacoQC", quietly = TRUE)) {
@@ -88,14 +88,14 @@ apply_peacoqc_filter <- function(
   n_before <- nrow(flowCore::exprs(flowframe))
 
   pqc_out <- PeacoQC::PeacoQC(
-    ff                        = flowframe,
-    channels                  = channels_to_use,
-    remove_margins            = isTRUE(peacoqc_params$remove_margins),
-    use_IQR_outlier_detection = isTRUE(peacoqc_params$use_IQR_outlier_detection),
-    IQR_multiplier            = as.numeric(peacoqc_params$IQR_multiplier %||% 1.5),
-    min_cells                 = as.integer(peacoqc_params$min_cells %||% 150L),
-    plot                      = FALSE,
-    save_fcs                  = FALSE
+    ff           = flowframe,
+    channels     = channels_to_use,
+    MAD          = as.numeric(peacoqc_params$MAD %||% 6),
+    IT_limit     = as.numeric(peacoqc_params$IT_limit %||% 0.6),
+    remove_zeros = isTRUE(peacoqc_params$remove_zeros),
+    min_cells    = as.integer(peacoqc_params$min_cells %||% 150L),
+    plot         = FALSE,
+    save_fcs     = FALSE
   )
 
   good_cells    <- pqc_out$GoodCells
@@ -301,33 +301,33 @@ run_sample_qc <- function(file_path, qc_config, sample_id = NULL) {
 
   # Step A: PeacoQC (with adaptive two-pass retry)
   # If PeacoQC removes > max_pct_per_step of events on first pass, retry with a
-  # relaxed IQR_multiplier. Both passes are logged for audit trail.
-  peacoqc_cfg    <- qc_config$peacoqc %||% list()
+  # relaxed IT_limit. Both passes are logged for audit trail.
+  peacoqc_cfg   <- qc_config$peacoqc %||% list()
   if (isTRUE(peacoqc_cfg$enabled %||% TRUE)) {
-    max_pct_step   <- as.numeric(peacoqc_cfg$max_pct_per_step %||% 0.60)
-    retry_iqr_step <- as.numeric(peacoqc_cfg$retry_iqr_multiplier_step %||% 0.5)
+    max_pct_step  <- as.numeric(peacoqc_cfg$max_pct_per_step %||% 0.60)
+    retry_IT_step <- as.numeric(peacoqc_cfg$retry_IT_limit_step %||% 0.1)
 
     pqc <- apply_peacoqc_filter(raw$flowframe, channels_to_use = NULL, peacoqc_params = peacoqc_cfg)
-    global_valid                       <- global_valid[pqc$valid_indices]
-    qc_metrics$pct_peacoqc_removed     <- pqc$pct_removed
-    qc_metrics$peacoqc_iqr_used        <- as.numeric(peacoqc_cfg$IQR_multiplier %||% 1.5)
-    qc_metrics$peacoqc_retry_triggered <- FALSE
+    global_valid                        <- global_valid[pqc$valid_indices]
+    qc_metrics$pct_peacoqc_removed      <- pqc$pct_removed
+    qc_metrics$peacoqc_IT_limit_used    <- as.numeric(peacoqc_cfg$IT_limit %||% 0.6)
+    qc_metrics$peacoqc_retry_triggered  <- FALSE
 
     if (pqc$pct_removed > max_pct_step * 100) {
       global_valid_retry <- seq_len(raw$n_raw)
-      new_iqr            <- as.numeric(peacoqc_cfg$IQR_multiplier %||% 1.5) + retry_iqr_step
-      retry_cfg          <- modifyList(peacoqc_cfg, list(IQR_multiplier = new_iqr))
-      pqc2               <- apply_peacoqc_filter(raw$flowframe, channels_to_use = NULL,
-                                                  peacoqc_params = retry_cfg)
+      new_IT    <- as.numeric(peacoqc_cfg$IT_limit %||% 0.6) + retry_IT_step
+      retry_cfg <- modifyList(peacoqc_cfg, list(IT_limit = new_IT))
+      pqc2      <- apply_peacoqc_filter(raw$flowframe, channels_to_use = NULL,
+                                        peacoqc_params = retry_cfg)
       if (pqc2$pct_removed < pqc$pct_removed) {
         qc_metrics$pct_peacoqc_removed_first_pass <- pqc$pct_removed
         global_valid                       <- global_valid_retry[pqc2$valid_indices]
         qc_metrics$pct_peacoqc_removed     <- pqc2$pct_removed
-        qc_metrics$peacoqc_iqr_used        <- new_iqr
+        qc_metrics$peacoqc_IT_limit_used   <- new_IT
         qc_metrics$peacoqc_retry_triggered <- TRUE
         warning(sprintf(
-          "[QC] Sample '%s': PeacoQC retry triggered (IQR %.1f→%.1f): %.1f%% → %.1f%% removed",
-          sample_id, as.numeric(peacoqc_cfg$IQR_multiplier %||% 1.5), new_iqr,
+          "[QC] Sample '%s': PeacoQC retry triggered (IT_limit %.2f→%.2f): %.1f%% → %.1f%% removed",
+          sample_id, as.numeric(peacoqc_cfg$IT_limit %||% 0.6), new_IT,
           pqc$pct_removed, pqc2$pct_removed
         ), call. = FALSE)
       }
@@ -335,10 +335,10 @@ run_sample_qc <- function(file_path, qc_config, sample_id = NULL) {
 
     qc_metrics$n_after_peacoqc <- length(global_valid)
   } else {
-    qc_metrics$n_after_peacoqc         <- length(global_valid)
-    qc_metrics$pct_peacoqc_removed     <- 0
-    qc_metrics$peacoqc_iqr_used        <- as.numeric(peacoqc_cfg$IQR_multiplier %||% 1.5)
-    qc_metrics$peacoqc_retry_triggered <- FALSE
+    qc_metrics$n_after_peacoqc          <- length(global_valid)
+    qc_metrics$pct_peacoqc_removed      <- 0
+    qc_metrics$peacoqc_IT_limit_used    <- as.numeric(peacoqc_cfg$IT_limit %||% 0.6)
+    qc_metrics$peacoqc_retry_triggered  <- FALSE
   }
 
   # Step B: Singlet gate

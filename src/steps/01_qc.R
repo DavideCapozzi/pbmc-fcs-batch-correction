@@ -29,8 +29,7 @@ config <- read_yaml("config/global_params.yml")
 if (!isTRUE(config$qc$enabled)) {
   message("[Step 01] qc.enabled = FALSE in config — skipping QC step.")
   message("[Step 01] Step 02 will load all events without cell filtering.")
-  quit(save = "no", status = 0)
-}
+} else {
 
 raw_dir  <- config$directories$raw
 out_dir  <- config$directories$processed
@@ -137,3 +136,4 @@ finalize_step_log(log_obj, output_files = out_file, status = "SUCCESS")
 write_step_json(log_obj, logs_dir)
 
 message("\n=== STEP 1 COMPLETE ===\n")
+} # end if (isTRUE(config$qc$enabled))

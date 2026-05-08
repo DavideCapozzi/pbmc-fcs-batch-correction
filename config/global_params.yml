@@ -49,12 +49,12 @@ qc:
 
   peacoqc:
     enabled: true
-    remove_margins: true
-    use_IQR_outlier_detection: true
-    IQR_multiplier: 3.5
+    MAD: 6
+    IT_limit: 0.6
+    remove_zeros: false
     min_cells: 150
     max_pct_per_step: 0.60          # Trigger retry if PeacoQC removes > 60% of events
-    retry_iqr_multiplier_step: 0.5  # Add this to IQR_multiplier on retry
+    retry_IT_limit_step: 0.1        # Add this to IT_limit on retry
 
   singlet:
     enabled: true
