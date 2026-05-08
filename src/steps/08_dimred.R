@@ -44,7 +44,10 @@ tryCatch({
 
     message("[Step 08] Mode: per-batch")
 
-    batches   <- names(config$directories$raw)
+    batch_aliases <- if (is.null(config$batch_labels)) list() else config$batch_labels
+    batches   <- unique(sapply(names(config$directories$raw), function(b) {
+      alias <- batch_aliases[[b]]; if (is.null(alias)) b else alias
+    }))
     sce_files <- file.path(out_dir, paste0("sce_batch_", batches, ".rds"))
     missing   <- sce_files[!file.exists(sce_files)]
     if (length(missing) > 0) {

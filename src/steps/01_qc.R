@@ -48,6 +48,8 @@ all_files_df <- do.call(rbind, lapply(names(raw_dir), function(batch_name) {
     return(NULL)
   }
   files <- list.files(dir_path, pattern = "\\.fcs$", full.names = TRUE, ignore.case = TRUE)
+  file_filter <- (config$directories$raw_filters %||% list())[[batch_name]]
+  if (!is.null(file_filter)) files <- files[grepl(file_filter, basename(files))]
   if (length(files) == 0L) {
     warning(sprintf("[Step 01] No FCS files found in: %s", dir_path), call. = FALSE)
     return(NULL)
@@ -55,7 +57,8 @@ all_files_df <- do.call(rbind, lapply(names(raw_dir), function(batch_name) {
   is_test  <- isTRUE(config$testing$enabled)
   test_lim <- as.integer(config$testing$max_files_per_panel %||% 5L)
   if (is_test) files <- head(files, test_lim)
-  data.frame(file_path = files, batch_id = batch_name, stringsAsFactors = FALSE)
+  batch_label <- (config$batch_labels %||% list())[[batch_name]] %||% batch_name
+  data.frame(file_path = files, batch_id = batch_label, stringsAsFactors = FALSE)
 }))
 
 if (is.null(all_files_df) || nrow(all_files_df) == 0L) {

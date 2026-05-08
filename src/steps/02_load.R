@@ -54,11 +54,13 @@ tryCatch({
   test_lim <- as.integer(config$testing$max_files_per_panel %||% 5L)
 
   cell_tbl <- read_and_prep_data(
-    data_dirs  = raw_dir,
-    cofactor   = cofactor_val,
-    exclude    = config$markers$exclude_channels,
-    test_mode  = is_test,
-    test_limit = test_lim
+    data_dirs    = raw_dir,
+    cofactor     = cofactor_val,
+    exclude      = config$markers$exclude_channels,
+    test_mode    = is_test,
+    test_limit   = test_lim,
+    raw_filters  = config$directories$raw_filters  %||% list(),
+    batch_labels = config$batch_labels             %||% list()
   )
 
   n_cells_raw <- nrow(cell_tbl)

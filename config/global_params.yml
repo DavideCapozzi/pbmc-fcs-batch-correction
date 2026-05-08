@@ -10,7 +10,10 @@ n_cores: 4
 directories:
   raw:
     pannelli_liquidi: "/mnt/h/Drive condivisi/MATERIALE LABORATORIO/FILE FCS/DAVIDE/pannelli_liquidi"
+    ds_old: "/mnt/h/Drive condivisi/MATERIALE LABORATORIO/FILE FCS/DAVIDE/pannelli_liquidi/DS old"
     duraclone: "/mnt/h/Drive condivisi/MATERIALE LABORATORIO/FILE FCS/DAVIDE/duraclone"
+  raw_filters:
+    pannelli_liquidi: "^\\[TEX\\]"   # restrict to TEX-panel files only
   intermediate: "results/intermediate"
   processed: "results/processed"
   figures: "results/figures"
@@ -108,5 +111,8 @@ dimred:
   n_neighbors: 15
   min_dist: 0.1
   seed: 1234
+
+batch_labels:
+  ds_old: "pannelli_liquidi"   # merge DS old into the same batch as TEX pannelli
 
 EOF: TRUE

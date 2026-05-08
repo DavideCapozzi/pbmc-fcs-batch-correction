@@ -135,21 +135,26 @@ read_single_fcs <- function(file_path, markers_to_keep, cofactor = 5) {
 # ------------------------------------------------------------------------------
 # Main: Batch Load Directory
 # ------------------------------------------------------------------------------
-read_and_prep_data <- function(data_dirs, cofactor = 5, exclude = NULL, test_mode = FALSE, test_limit = 5) {
-  
+read_and_prep_data <- function(data_dirs, cofactor = 5, exclude = NULL, test_mode = FALSE, test_limit = 5,
+                               raw_filters = list(), batch_labels = list()) {
+
   all_files_df <- data.frame(file_path = character(), batch_id = character(), stringsAsFactors = FALSE)
-  
+
   for (dir_name in names(data_dirs)) {
     dir_path <- data_dirs[[dir_name]]
     files_in_dir <- list.files(dir_path, pattern = "\\.fcs$", full.names = TRUE, recursive = FALSE)
-    
+
+    file_filter <- raw_filters[[dir_name]]
+    if (!is.null(file_filter)) files_in_dir <- files_in_dir[grepl(file_filter, basename(files_in_dir))]
+
     if (length(files_in_dir) == 0) next
-    
+
     if (test_mode) {
       files_in_dir <- head(files_in_dir, test_limit)
     }
-    
-    temp_df <- data.frame(file_path = files_in_dir, batch_id = dir_name, stringsAsFactors = FALSE)
+
+    batch_label <- batch_labels[[dir_name]] %||% dir_name
+    temp_df <- data.frame(file_path = files_in_dir, batch_id = batch_label, stringsAsFactors = FALSE)
     all_files_df <- rbind(all_files_df, temp_df)
   }
   
@@ -173,7 +178,7 @@ read_and_prep_data <- function(data_dirs, cofactor = 5, exclude = NULL, test_mod
                     i, length(fcs_files), basename(f), b_id, nrow(df)))
     
     df$sample_id <- basename(f)
-    df$batch     <- b_id 
+    df$batch     <- batch_labels[[b_id]] %||% b_id
     
     return(df)
   })

@@ -20,7 +20,11 @@ message("\n=== PIPELINE STEP 4: POPULATION FREQUENCY COMPUTATION ===")
 
 config  <- read_yaml("config/global_params.yml")
 out_dir <- config$directories$processed
-batches <- names(config$directories$raw)
+
+batch_aliases <- if (is.null(config$batch_labels)) list() else config$batch_labels
+batches <- unique(sapply(names(config$directories$raw), function(b) {
+  alias <- batch_aliases[[b]]; if (is.null(alias)) b else alias
+}))
 
 match_file <- file.path(out_dir, "cluster_match_table.rds")
 sce_files  <- file.path(out_dir, paste0("sce_batch_", batches, ".rds"))
