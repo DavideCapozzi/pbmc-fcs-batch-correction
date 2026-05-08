@@ -406,13 +406,19 @@ run_sample_qc <- function(file_path, qc_config, sample_id = NULL) {
   qc_metrics$n_final           <- length(global_valid)
   qc_metrics$pct_total_removed <- 100 * (1 - length(global_valid) / raw$n_raw)
 
-  # Guard: catastrophic removal
+  # Guard: catastrophic removal — return gracefully so the caller can log full metrics
   max_pct <- as.numeric(qc_config$max_pct_removed %||% 85)
   if (qc_metrics$pct_total_removed > max_pct) {
-    stop(sprintf(
-      "[QC] Sample '%s': %.1f%% of cells removed (threshold: %.0f%%). ",
-      sample_id, qc_metrics$pct_total_removed, max_pct
-    ), "Check data quality or raise qc.max_pct_removed in config.")
+    qc_metrics$exclusion_reason <- sprintf(
+      "%.1f%% of cells removed (threshold: %.0f%%) — raise qc.max_pct_removed or accept sample exclusion",
+      qc_metrics$pct_total_removed, max_pct
+    )
+    return(list(
+      valid_indices = NULL,
+      qc_metrics    = qc_metrics,
+      file_path     = file_path,
+      sample_id     = sample_id
+    ))
   }
 
   min_cells <- as.integer(qc_config$min_cells_final %||% 5000L)

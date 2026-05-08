@@ -86,22 +86,26 @@ log_obj <- init_step_log(
 
   message(sprintf("[Step 01] [%s] Processing: %s", bid, sid))
 
+  error_msg <- NULL
   result <- tryCatch(
     run_sample_qc(fp, qc_config = qc_cfg, sample_id = sid),
     error = function(e) {
-      warning(sprintf("[Step 01] QC failed for '%s': %s — sample EXCLUDED.", sid, e$message),
+      error_msg <<- conditionMessage(e)
+      warning(sprintf("[Step 01] QC failed for '%s': %s — sample EXCLUDED.", sid, error_msg),
               call. = FALSE)
       NULL
     }
   )
 
-  if (!is.null(result)) {
+  if (!is.null(result) && !is.null(result$valid_indices)) {
     message(sprintf("         [%s] n_raw=%d  n_final=%d  (%.1f%% removed)",
                     sid, result$qc_metrics$n_raw, result$qc_metrics$n_final,
                     result$qc_metrics$pct_total_removed))
+  } else if (!is.null(result)) {
+    message(sprintf("         [%s] EXCLUDED: %s", sid, result$qc_metrics$exclusion_reason))
   }
 
-  list(sid = sid, bid = bid, fp = fp, result = result)
+  list(sid = sid, bid = bid, fp = fp, result = result, error_msg = error_msg)
 }
 
 raw_results <- pipeline_lapply(seq_len(nrow(all_files_df)), .qc_worker, n_workers = n_workers)
@@ -122,8 +126,18 @@ for (item in raw_results) {
   result <- item$result
 
   if (is.null(result)) {
-    qc_filters[[sid]] <- NULL
-    qc_summary_list[[sid]] <- list(status = "EXCLUDED", n_raw = NA, n_final = NA)
+    # Unexpected error (e.g. file read failure): no metrics available
+    qc_summary_list[[sid]] <- list(
+      status        = "EXCLUDED",
+      error_message = item$error_msg %||% "unknown error",
+      n_raw         = NA_integer_,
+      n_final       = NA_integer_
+    )
+    next
+  }
+  if (is.null(result$valid_indices)) {
+    # Expected exclusion (max_pct_removed exceeded): full metrics are available
+    qc_summary_list[[sid]] <- c(list(status = "EXCLUDED"), result$qc_metrics)
     next
   }
 
@@ -135,9 +149,11 @@ for (item in raw_results) {
   qc_summary_list[[sid]] <- result$qc_metrics
 }
 
-n_processed      <- length(qc_filters)
-n_excluded       <- nrow(all_files_df) - n_processed
+qc_filters       <- Filter(Negate(is.null), qc_filters)  # drop excluded (NULL) entries
 passing_sids     <- names(qc_filters)
+n_processed      <- length(passing_sids)
+n_excluded       <- nrow(all_files_df) - n_processed
+excluded_sids    <- setdiff(basename(all_files_df$file_path), passing_sids)
 mean_pct_removed <- mean(
   sapply(qc_summary_list[passing_sids], function(x) x$pct_total_removed),
   na.rm = TRUE
@@ -145,6 +161,13 @@ mean_pct_removed <- mean(
 
 message(sprintf("[Step 01] Samples processed: %d  |  Excluded: %d  |  Mean removal: %.1f%%",
                 n_processed, n_excluded, mean_pct_removed))
+if (length(excluded_sids) > 0L) {
+  for (sid in excluded_sids) {
+    reason <- qc_summary_list[[sid]]$exclusion_reason %||%
+              qc_summary_list[[sid]]$error_message   %||% "unknown error"
+    message(sprintf("[Step 01] EXCLUDED: %s — %s", sid, reason))
+  }
+}
 
 out_file <- file.path(out_dir, "qc_cell_filters.rds")
 saveRDS(qc_filters, out_file)
