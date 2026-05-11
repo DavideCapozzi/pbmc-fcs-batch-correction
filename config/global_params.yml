@@ -18,6 +18,10 @@ directories:
     duraclone: "/mnt/h/Drive condivisi/MATERIALE LABORATORIO/FILE FCS/DAVIDE/duraclone"
   raw_filters:
     pannelli_liquidi: "^\\[TEX\\]"   # restrict to TEX-panel files only
+  exclude_files:
+    duraclone:
+      - "DS004 TEX1.fcs"   # confirmed outlier: CD3 threshold 0.793 arcsinh, different MFI scale
+      - "DS005 TEX2.fcs"   # confirmed outlier: same acquisition problem as DS004
   intermediate: "results/intermediate"
   processed: "results/processed"
   figures: "results/figures"
@@ -85,6 +89,8 @@ cd3_gate:
   uninformative_gap: 1.0    # Min arcsinh gap between k-means centers; below this uses fallback
   fallback_threshold: 4.0   # arcsinh CD3 threshold when k-means gap is too small
   min_cd3_pct: 10.0         # Warn (not error) if < 10% of sample cells pass CD3 gate
+  min_threshold: 1.5        # Auto-exclude sample if k-means CD3 threshold < this value;
+                            # DS004 threshold=0.793 → excluded; legit low-lot samples 1.7–1.9 → pass
 
 cd8_gate:
   enabled: false            # DISABLED: CD8 MFI is instrument-specific (Assay Effect) — per-sample
@@ -133,6 +139,10 @@ auto_phenotyping:
     KI67: 6.5                     # All observed centroids are 4.8-6.2; floor at 6.5 suppresses
                                   # the (Proliferating) tag universally — KI67 staining appears
                                   # non-specifically high across all populations in both panels
+    PD1:   8.0                    # pannelli_liquidi centroid max = 7.705; floor suppresses widespread
+                                  # (Exhausted) tagging (same saturation mechanism as KI67)
+    CD137: 7.0                    # pannelli_liquidi centroid max = 6.343; floor suppresses
+                                  # (Activated) tagging universally
 
 scoring:
   run_patient_scoring: true
@@ -178,5 +188,7 @@ population_labels:
   pop_16: "Unresolved"
   pop_17: "Unresolved"
   pop_18: "Unresolved"
+  pop_19: "Naive CD8+ T cell (batch-discordant)"
+  pop_20: "Unresolved"
 
 EOF: TRUE

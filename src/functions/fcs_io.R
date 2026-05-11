@@ -137,7 +137,8 @@ read_single_fcs <- function(file_path, markers_to_keep, cofactor = 5) {
 # Main: Batch Load Directory
 # ------------------------------------------------------------------------------
 read_and_prep_data <- function(data_dirs, cofactor = 5, exclude = NULL, test_mode = FALSE, test_limit = 5,
-                               raw_filters = list(), batch_labels = list(), n_workers = 1L) {
+                               raw_filters = list(), batch_labels = list(), exclude_files = list(),
+                               n_workers = 1L) {
 
   all_files_df <- data.frame(file_path = character(), batch_id = character(), stringsAsFactors = FALSE)
 
@@ -147,6 +148,17 @@ read_and_prep_data <- function(data_dirs, cofactor = 5, exclude = NULL, test_mod
 
     file_filter <- raw_filters[[dir_name]]
     if (!is.null(file_filter)) files_in_dir <- files_in_dir[grepl(file_filter, basename(files_in_dir))]
+
+    file_exclude <- exclude_files[[dir_name]]
+    if (!is.null(file_exclude)) {
+      excluded <- basename(files_in_dir) %in% file_exclude
+      if (any(excluded)) {
+        for (f in files_in_dir[excluded]) {
+          message(sprintf("[IO] Excluded by config (exclude_files): %s [%s]", basename(f), dir_name))
+        }
+        files_in_dir <- files_in_dir[!excluded]
+      }
+    }
 
     if (length(files_in_dir) == 0) next
 

@@ -57,14 +57,15 @@ tryCatch({
   n_workers <- get_n_workers(config)
 
   cell_tbl <- read_and_prep_data(
-    data_dirs    = raw_dir,
-    cofactor     = cofactor_val,
-    exclude      = config$markers$exclude_channels,
-    test_mode    = is_test,
-    test_limit   = test_lim,
-    raw_filters  = config$directories$raw_filters  %||% list(),
-    batch_labels = config$batch_labels             %||% list(),
-    n_workers    = n_workers
+    data_dirs     = raw_dir,
+    cofactor      = cofactor_val,
+    exclude       = config$markers$exclude_channels,
+    test_mode     = is_test,
+    test_limit    = test_lim,
+    raw_filters   = config$directories$raw_filters   %||% list(),
+    batch_labels  = config$batch_labels              %||% list(),
+    exclude_files = config$directories$exclude_files %||% list(),
+    n_workers     = n_workers
   )
 
   n_cells_raw <- nrow(cell_tbl)
@@ -143,14 +144,16 @@ tryCatch({
   if (isTRUE(config$cd3_gate$enabled) && "CD3" %in% rownames(sce)) {
     message("[Step 02] CD3+ gate enabled — restricting to CD3+ T cells.")
 
-    cd3_gap_thr  <- as.numeric(config$cd3_gate$uninformative_gap %||% 1.0)
-    cd3_fallback <- as.numeric(config$cd3_gate$fallback_threshold %||% 4.0)
-    min_cd3_pct  <- as.numeric(config$cd3_gate$min_cd3_pct        %||% 10.0)
+    cd3_gap_thr    <- as.numeric(config$cd3_gate$uninformative_gap  %||% 1.0)
+    cd3_fallback   <- as.numeric(config$cd3_gate$fallback_threshold %||% 4.0)
+    min_cd3_pct    <- as.numeric(config$cd3_gate$min_cd3_pct        %||% 10.0)
+    min_cd3_thr    <- as.numeric(config$cd3_gate$min_threshold       %||% 0.0)
 
     cd3_expr   <- assay(sce, "exprs")["CD3", ]
     sample_ids <- sce$sample_id
     keep_cells <- logical(ncol(sce))
     cd3_metrics <- list()
+    cd3_auto_excluded <- character(0L)
 
     for (sid in unique(sample_ids)) {
       idx      <- which(sample_ids == sid)
@@ -174,6 +177,24 @@ tryCatch({
         cd3_fallback
       })
 
+      if (min_cd3_thr > 0 && thr < min_cd3_thr) {
+        warning(sprintf(
+          "[CD3 gate] AUTO-EXCLUDED '%s': CD3 threshold=%.3f < min_threshold=%.1f — anomalous MFI scale.",
+          sid, thr, min_cd3_thr), call. = FALSE)
+        cd3_auto_excluded <- c(cd3_auto_excluded, sid)
+        cd3_metrics[[sid]] <- list(
+          n_before         = n_before,
+          n_after          = 0L,
+          pct_cd3          = 0,
+          threshold        = round(thr, 3L),
+          auto_excluded    = TRUE,
+          exclusion_reason = sprintf("CD3 threshold %.3f < min_threshold %.1f", thr, min_cd3_thr)
+        )
+        message(sprintf("   [CD3 gate] %-35s AUTO-EXCLUDED (thr=%.3f < %.1f)",
+                        sid, thr, min_cd3_thr))
+        next
+      }
+
       pos_idx <- idx[vals > thr]
       n_after <- length(pos_idx)
       pct_cd3 <- 100 * n_after / n_before
@@ -190,13 +211,19 @@ tryCatch({
 
       keep_cells[pos_idx] <- TRUE
       cd3_metrics[[sid]]  <- list(
-        n_before  = n_before,
-        n_after   = n_after,
-        pct_cd3   = round(pct_cd3, 1L),
-        threshold = round(thr, 3L)
+        n_before      = n_before,
+        n_after       = n_after,
+        pct_cd3       = round(pct_cd3, 1L),
+        threshold     = round(thr, 3L),
+        auto_excluded = FALSE
       )
       message(sprintf("   [CD3 gate] %-35s %d → %d (%.1f%% CD3+, thr=%.2f)",
                       sid, n_before, n_after, pct_cd3, thr))
+    }
+
+    if (length(cd3_auto_excluded) > 0) {
+      message(sprintf("[CD3 gate] Auto-excluded %d sample(s) for anomalous CD3 threshold: %s",
+                      length(cd3_auto_excluded), paste(cd3_auto_excluded, collapse = ", ")))
     }
 
     n_before_gate <- ncol(sce)
@@ -207,12 +234,13 @@ tryCatch({
                     n_before_gate, n_after_gate,
                     100 * n_after_gate / n_before_gate))
 
-    add_metric(log_obj, "cd3_gate_applied",      TRUE)
-    add_metric(log_obj, "cd3_gate_n_before",     n_before_gate)
-    add_metric(log_obj, "cd3_gate_n_after",      n_after_gate)
-    add_metric(log_obj, "cd3_gate_pct_retained", round(100 * n_after_gate / n_before_gate, 1L))
-    add_metric(log_obj, "cd3_gate_per_sample",   cd3_metrics)
-    add_metric(log_obj, "n_cells_final",         n_after_gate)
+    add_metric(log_obj, "cd3_gate_applied",        TRUE)
+    add_metric(log_obj, "cd3_gate_n_before",       n_before_gate)
+    add_metric(log_obj, "cd3_gate_n_after",        n_after_gate)
+    add_metric(log_obj, "cd3_gate_pct_retained",   round(100 * n_after_gate / n_before_gate, 1L))
+    add_metric(log_obj, "cd3_gate_per_sample",     cd3_metrics)
+    add_metric(log_obj, "cd3_auto_excluded",       cd3_auto_excluded)
+    add_metric(log_obj, "n_cells_final",           n_after_gate)
   } else {
     add_metric(log_obj, "cd3_gate_applied", FALSE)
   }

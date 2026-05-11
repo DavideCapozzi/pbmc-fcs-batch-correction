@@ -31,9 +31,8 @@ config    <- yaml::read_yaml("config/global_params.yml")
 ts        <- format(Sys.time(), "%Y%m%d_%H%M%S")
 proc_dir  <- config$directories$processed   %||% "results/processed"
 integ_dir <- config$directories$integration %||% "results/integration"
-out_dir   <- "results/diagnostics"
-
-if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+out_dir  <- file.path("results/diagnostics", paste0("diag_", ts))
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 out_pdf  <- file.path(out_dir, paste0("integration_diagnostic_", ts, ".pdf"))
 out_json <- file.path(out_dir, paste0("integration_diagnostic_", ts, ".json"))
 
@@ -170,6 +169,17 @@ message(sprintf("[Diag] Saturated markers (%d/%d): %s",
 
 # ── 5. Gate cascade from step 02 log ─────────────────────────────────────────
 
+read_latest_step01_log <- function(logs_dir) {
+  candidates <- c(
+    list.files(file.path(logs_dir, "steps"), pattern = "^01_.*\\.json$", full.names = TRUE),
+    unlist(lapply(list.dirs(logs_dir, recursive = FALSE), function(rd)
+      list.files(file.path(rd, "steps"), pattern = "^01_.*\\.json$", full.names = TRUE)))
+  )
+  if (length(candidates) == 0L) return(NULL)
+  f <- candidates[which.max(file.mtime(candidates))]
+  tryCatch(jsonlite::fromJSON(f, simplifyDataFrame = FALSE), error = function(e) NULL)
+}
+
 read_latest_step02_log <- function(logs_dir) {
   candidates <- c(
     list.files(file.path(logs_dir, "steps"), pattern = "^02_.*\\.json$", full.names = TRUE),
@@ -213,6 +223,37 @@ if (!is.null(gate_log) && !is.null(gate_log$metrics$cd3_gate_per_sample)) {
                   nrow(gate_data), sum(gate_data$cd3_anomaly), sum(gate_data$cd3_low_cells)))
 } else {
   message("[Diag] No step 02 gate log found — skipping gate cascade page.")
+}
+
+# ── 5b. QC gate metrics from step 01 log ─────────────────────────────────────
+
+qc_log        <- read_latest_step01_log(config$directories$logs %||% "results/logs")
+qc_per_sample <- NULL
+
+if (!is.null(qc_log) && !is.null(qc_log$metrics$per_sample_qc)) {
+  pqs <- qc_log$metrics$per_sample_qc
+  qc_rows <- lapply(names(pqs), function(sid) {
+    s  <- pqs[[sid]]
+    sb <- if (!is.null(fm$batch)) fm$batch[fm$sample_id == sid] else character(0)
+    data.frame(
+      sample_id     = sid,
+      batch         = if (length(sb) > 0) sb[1] else NA_character_,
+      pct_peacoqc   = as.numeric(s$pct_peacoqc_removed  %||% NA_real_),
+      pct_singlet   = as.numeric(s$pct_singlet_removed   %||% NA_real_),
+      pct_debris    = as.numeric(s$pct_debris_removed    %||% NA_real_),
+      pct_viability = as.numeric(s$pct_viability_removed %||% NA_real_),
+      pct_total     = as.numeric(s$pct_total_removed     %||% NA_real_),
+      viability_thr = as.numeric(s$viability_threshold   %||% NA_real_),
+      stringsAsFactors = FALSE
+    )
+  })
+  qc_per_sample <- do.call(rbind, qc_rows)
+  qc_per_sample$high_viability_removal <- !is.na(qc_per_sample$pct_viability) &
+    qc_per_sample$pct_viability > 25
+  message(sprintf("[Diag] QC gate log loaded: %d samples, %d high-viability-removal (>25%%)",
+                  nrow(qc_per_sample), sum(qc_per_sample$high_viability_removal, na.rm = TRUE)))
+} else {
+  message("[Diag] No step 01 QC log found — skipping QC gate page.")
 }
 
 # ── 6. Plot functions ─────────────────────────────────────────────────────────
@@ -506,6 +547,52 @@ make_gate_plot <- function(gd) {
   }
 }
 
+# Page 8 — QC gate efficiency --------------------------------------------------
+make_qc_gate_plot <- function(qc_ps) {
+  if (is.null(qc_ps) || nrow(qc_ps) == 0L)
+    return(ggplot() + labs(title = "QC gate data not available") + theme_void())
+
+  batch_cols <- c("#2980b9", "#e67e22")
+  batches    <- sort(unique(qc_ps$batch[!is.na(qc_ps$batch)]))
+  names(batch_cols) <- batches
+
+  make_panel <- function(col, title, ref_line = NULL, ref_label = NULL) {
+    df <- qc_ps[!is.na(qc_ps[[col]]) & !is.na(qc_ps$batch), ]
+    p  <- ggplot(df, aes(x = batch, y = .data[[col]], color = batch)) +
+      geom_boxplot(outlier.shape = NA, width = 0.4, linewidth = 0.6) +
+      geom_jitter(width = 0.12, size = 1.8, alpha = 0.75) +
+      scale_color_manual(values = batch_cols, guide = "none") +
+      scale_y_continuous(labels = function(x) paste0(round(x), "%")) +
+      labs(title = title, x = NULL, y = "% cells removed") +
+      theme_minimal(base_size = 10) +
+      theme(plot.title = element_text(face = "bold", size = 11))
+    if (!is.null(ref_line))
+      p <- p +
+        geom_hline(yintercept = ref_line, linetype = "dashed",
+                   color = "#c0392b", linewidth = 0.7) +
+        annotate("text", x = 0.55, y = ref_line + 1,
+                 label = ref_label, hjust = 0, size = 2.7, color = "#c0392b")
+    p
+  }
+
+  p_peaco   <- make_panel("pct_peacoqc",   "PeacoQC (temporal instability)")
+  p_singlet <- make_panel("pct_singlet",   "Singlet gate (doublet removal)")
+  p_debris  <- make_panel("pct_debris",    "Debris gate (FSC/SSC)")
+  p_viab    <- make_panel("pct_viability", "Viability gate (dead cells)",
+                           ref_line = 25, ref_label = "flag > 25%")
+
+  (p_peaco | p_singlet) / (p_debris | p_viab) +
+    plot_annotation(
+      title    = "QC Gate Efficiency — % cells removed per gate per sample",
+      subtitle = paste(
+        "High viability removal (>25%) = many dead/dying cells in raw data.",
+        "High singlet removal = many doublets. Compare batches for systematic QC differences."
+      ),
+      theme = theme(
+        plot.title    = element_text(face = "bold", size = 13),
+        plot.subtitle = element_text(size = 9, color = "#7f8c8d")))
+}
+
 # Page 6 — Per-sample frequency distributions ----------------------------------
 make_sample_dist <- function(fm, ps, n_show = 9L) {
   # Select most informative populations: greens first, then lowest-CV yellows
@@ -571,6 +658,9 @@ print(p6)
 if (!is.null(gate_data) && nrow(gate_data) > 0L) {
   print(make_gate_plot(gate_data))
 }
+if (!is.null(qc_per_sample) && nrow(qc_per_sample) > 0L) {
+  print(make_qc_gate_plot(qc_per_sample))
+}
 invisible(grDevices::dev.off())
 
 message(sprintf("[Diag] PDF written: %s", out_pdf))
@@ -612,6 +702,14 @@ recommendations <- c(
             mean(c(high_cv_pops$a_cv, high_cv_pops$b_cv), na.rm = TRUE))
 )
 
+if (!is.null(qc_per_sample)) {
+  n_high_viab <- sum(qc_per_sample$high_viability_removal, na.rm = TRUE)
+  if (n_high_viab > 0)
+    recommendations <- c(recommendations,
+      sprintf("%d sample(s) had >25%% cells removed by viability gate — consider tightening threshold (current: median + 2.5×MAD). High dead-cell fraction may inflate non-specific marker expression and increase intra-batch CV.",
+              n_high_viab))
+}
+
 summary_json <- list(
   generated_at         = format(Sys.time(), "%Y-%m-%dT%H:%M:%S"),
   n_matched_populations = length(matched_pops),
@@ -651,6 +749,24 @@ summary_json <- list(
         n_cd3_anomalies = sum(b$cd3_anomaly),
         mean_cd8_thr    = if (any(!is.na(b$cd8_thr))) round(mean(b$cd8_thr, na.rm = TRUE), 3) else NULL,
         mean_cd8_pct    = if (any(!is.na(b$cd8_pct))) round(mean(b$cd8_pct, na.rm = TRUE), 1) else NULL
+      ))
+    )
+  } else NULL,
+  qc_gate_summary = if (!is.null(qc_per_sample) && nrow(qc_per_sample) > 0L) {
+    valid_qs <- qc_per_sample[!is.na(qc_per_sample$batch), ]
+    per_batch <- split(valid_qs, valid_qs$batch)
+    list(
+      per_batch = lapply(per_batch, function(b) list(
+        n_samples                = nrow(b),
+        mean_pct_peacoqc         = round(mean(b$pct_peacoqc,   na.rm = TRUE), 1),
+        mean_pct_singlet         = round(mean(b$pct_singlet,    na.rm = TRUE), 1),
+        mean_pct_debris          = round(mean(b$pct_debris,     na.rm = TRUE), 1),
+        mean_pct_viability       = round(mean(b$pct_viability,  na.rm = TRUE), 1),
+        sd_pct_viability         = round(sd(b$pct_viability,    na.rm = TRUE), 1),
+        mean_pct_total           = round(mean(b$pct_total,      na.rm = TRUE), 1),
+        n_high_viability_removal = sum(b$high_viability_removal, na.rm = TRUE),
+        high_viability_samples   = b$sample_id[!is.na(b$high_viability_removal) &
+                                                  b$high_viability_removal]
       ))
     )
   } else NULL,
