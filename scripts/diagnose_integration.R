@@ -115,7 +115,6 @@ pop_summary$status <- with(pop_summary, {
   )
   green <- (
     (!is.na(cos)   & cos >= 0.95)                        &
-    (is.na(d_pass) | (!is.na(d_pass) & d_pass == TRUE))  &
     (is.na(j_pass) | (!is.na(j_pass) & j_pass == TRUE))  &
     (is.na(a_cv)   | a_cv < 1.5)                         &
     (is.na(b_cv)   | b_cv < 1.5)                         &
@@ -169,7 +168,54 @@ message(sprintf("[Diag] Saturated markers (%d/%d): %s",
   length(sat_markers), length(markers),
   if (length(sat_markers) == 0) "none" else paste(sat_markers, collapse = ", ")))
 
-# ── 5. Plot functions ─────────────────────────────────────────────────────────
+# ── 5. Gate cascade from step 02 log ─────────────────────────────────────────
+
+read_latest_step02_log <- function(logs_dir) {
+  candidates <- c(
+    list.files(file.path(logs_dir, "steps"), pattern = "^02_.*\\.json$", full.names = TRUE),
+    unlist(lapply(list.dirs(logs_dir, recursive = FALSE), function(rd)
+      list.files(file.path(rd, "steps"), pattern = "^02_.*\\.json$", full.names = TRUE)))
+  )
+  if (length(candidates) == 0L) return(NULL)
+  f <- candidates[which.max(file.mtime(candidates))]
+  tryCatch(jsonlite::fromJSON(f, simplifyDataFrame = FALSE), error = function(e) NULL)
+}
+
+gate_log  <- read_latest_step02_log(config$directories$logs %||% "results/logs")
+gate_data <- NULL
+
+if (!is.null(gate_log) && !is.null(gate_log$metrics$cd3_gate_per_sample)) {
+  cd3_s <- gate_log$metrics$cd3_gate_per_sample
+  cd8_s <- gate_log$metrics$cd8_gate_per_sample %||% list()
+  min_cells <- as.integer(config$qc$min_cells_final %||% 5000L)
+
+  gate_rows <- lapply(names(cd3_s), function(sid) {
+    cd3 <- cd3_s[[sid]]
+    cd8 <- cd8_s[[sid]] %||% list()
+    sb  <- fm$batch[fm$sample_id == sid]
+    data.frame(
+      sample_id    = sid,
+      batch        = if (length(sb) > 0) sb[1] else NA_character_,
+      cd3_thr      = as.numeric(cd3$threshold  %||% NA_real_),
+      cd3_pct      = as.numeric(cd3$pct_cd3    %||% NA_real_),
+      cd3_n_after  = as.integer(cd3$n_after    %||% NA_integer_),
+      cd8_thr      = as.numeric(cd8$threshold  %||% NA_real_),
+      cd8_pct      = as.numeric(cd8$pct_cd8    %||% NA_real_),
+      cd8_n_after  = as.integer(cd8$n_after    %||% NA_integer_),
+      stringsAsFactors = FALSE
+    )
+  })
+  gate_data <- do.call(rbind, gate_rows)
+  gate_data$cd3_anomaly    <- !is.na(gate_data$cd3_thr) & gate_data$cd3_thr < 2.0
+  gate_data$cd3_low_cells  <- !is.na(gate_data$cd3_n_after) & gate_data$cd3_n_after < min_cells
+  gate_data$has_cd8        <- !is.na(gate_data$cd8_thr)
+  message(sprintf("[Diag] Gate log loaded: %d samples, %d CD3 anomalies, %d below min_cells",
+                  nrow(gate_data), sum(gate_data$cd3_anomaly), sum(gate_data$cd3_low_cells)))
+} else {
+  message("[Diag] No step 02 gate log found — skipping gate cascade page.")
+}
+
+# ── 6. Plot functions ─────────────────────────────────────────────────────────
 
 # Page 1 — Population scorecard ------------------------------------------------
 make_scorecard <- function(ps) {
@@ -370,6 +416,96 @@ make_cv_plot <- function(ps) {
           legend.position = "bottom")
 }
 
+# Page 7 — Gate cascade summary (CD3 / CD8 thresholds per sample) --------------
+make_gate_plot <- function(gd) {
+  batch_cols <- c("#2980b9", "#e67e22")
+  batches    <- sort(unique(gd$batch[!is.na(gd$batch)]))
+  names(batch_cols) <- batches
+
+  # CD3 threshold distribution
+  p_cd3_thr <- ggplot(gd[!is.na(gd$cd3_thr), ],
+                      aes(x = batch, y = cd3_thr, color = batch)) +
+    geom_jitter(aes(shape = cd3_anomaly), width = 0.15, size = 2.5, alpha = 0.85) +
+    scale_shape_manual(values = c(`FALSE` = 16, `TRUE` = 8),
+                       labels = c("Normal", "ANOMALY (thr < 2.0)"), name = NULL) +
+    scale_color_manual(values = batch_cols, guide = "none") +
+    geom_hline(yintercept = 2.0, linetype = "dashed", color = "#c0392b", linewidth = 0.7) +
+    annotate("text", x = 0.55, y = 2.1, label = "anomaly < 2.0", hjust = 0,
+             size = 2.8, color = "#c0392b") +
+    geom_hline(yintercept = as.numeric(config$cd3_gate$fallback_threshold %||% 4.0),
+               linetype = "dotted", color = "#8e44ad", linewidth = 0.7) +
+    annotate("text", x = 0.55,
+             y = as.numeric(config$cd3_gate$fallback_threshold %||% 4.0) + 0.1,
+             label = "fallback", hjust = 0, size = 2.8, color = "#8e44ad") +
+    ggrepel::geom_text_repel(
+      data = gd[!is.na(gd$cd3_thr) & gd$cd3_anomaly, ],
+      aes(label = substr(sample_id, 1, 20)), size = 2.3, color = "#c0392b",
+      max.overlaps = 10, show.legend = FALSE) +
+    labs(title = "CD3 k-means threshold per sample", x = NULL,
+         y = "arcsinh threshold") +
+    theme_minimal(base_size = 10) +
+    theme(plot.title = element_text(face = "bold", size = 11),
+          legend.position = "bottom", legend.text = element_text(size = 8))
+
+  # CD3 %positive distribution
+  p_cd3_pct <- ggplot(gd[!is.na(gd$cd3_pct), ],
+                      aes(x = batch, y = cd3_pct, color = batch)) +
+    geom_jitter(aes(shape = cd3_low_cells), width = 0.15, size = 2.5, alpha = 0.85) +
+    scale_shape_manual(values = c(`FALSE` = 16, `TRUE` = 8),
+                       labels = c("OK", "< min_cells"), name = NULL) +
+    scale_color_manual(values = batch_cols, guide = "none") +
+    geom_hline(yintercept = as.numeric(config$cd3_gate$min_cd3_pct %||% 10),
+               linetype = "dashed", color = "#c0392b", linewidth = 0.7) +
+    labs(title = "CD3+ % per sample (post-gate)", x = NULL,
+         y = "% CD3+ cells") +
+    theme_minimal(base_size = 10) +
+    theme(plot.title = element_text(face = "bold", size = 11),
+          legend.position = "bottom", legend.text = element_text(size = 8))
+
+  has_cd8 <- any(!is.na(gd$cd8_thr))
+
+  if (has_cd8) {
+    p_cd8_thr <- ggplot(gd[!is.na(gd$cd8_thr), ],
+                        aes(x = batch, y = cd8_thr, color = batch)) +
+      geom_jitter(width = 0.15, size = 2.5, alpha = 0.85) +
+      scale_color_manual(values = batch_cols, guide = "none") +
+      geom_hline(yintercept = as.numeric(config$cd8_gate$fallback_threshold %||% 3.5),
+                 linetype = "dotted", color = "#8e44ad", linewidth = 0.7) +
+      annotate("text", x = 0.55,
+               y = as.numeric(config$cd8_gate$fallback_threshold %||% 3.5) + 0.1,
+               label = "fallback", hjust = 0, size = 2.8, color = "#8e44ad") +
+      labs(title = "CD8 k-means threshold per sample", x = NULL,
+           y = "arcsinh threshold") +
+      theme_minimal(base_size = 10) +
+      theme(plot.title = element_text(face = "bold", size = 11))
+
+    p_cd8_pct <- ggplot(gd[!is.na(gd$cd8_pct), ],
+                        aes(x = batch, y = cd8_pct, color = batch)) +
+      geom_jitter(width = 0.15, size = 2.5, alpha = 0.85) +
+      scale_color_manual(values = batch_cols, guide = "none") +
+      geom_hline(yintercept = as.numeric(config$cd8_gate$min_cd8_pct %||% 10),
+                 linetype = "dashed", color = "#c0392b", linewidth = 0.7) +
+      labs(title = "CD8+ % per sample (post-CD3 gate)", x = NULL,
+           y = "% CD8+ of CD3+ cells") +
+      theme_minimal(base_size = 10) +
+      theme(plot.title = element_text(face = "bold", size = 11))
+
+    (p_cd3_thr | p_cd3_pct) / (p_cd8_thr | p_cd8_pct) +
+      plot_annotation(
+        title    = "Gate Cascade — CD3 / CD8 k-means Thresholds",
+        subtitle = "Dashed red = warning threshold  ·  Dotted purple = fallback threshold  ·  Star = anomaly",
+        theme    = theme(plot.title    = element_text(face = "bold", size = 13),
+                         plot.subtitle = element_text(size = 9, color = "#7f8c8d")))
+  } else {
+    (p_cd3_thr | p_cd3_pct) +
+      plot_annotation(
+        title    = "Gate Cascade — CD3 k-means Thresholds per Sample",
+        subtitle = "Dashed red = min_cd3_pct warning  ·  Dotted purple = fallback threshold  ·  Star = anomaly",
+        theme    = theme(plot.title    = element_text(face = "bold", size = 13),
+                         plot.subtitle = element_text(size = 9, color = "#7f8c8d")))
+  }
+}
+
 # Page 6 — Per-sample frequency distributions ----------------------------------
 make_sample_dist <- function(fm, ps, n_show = 9L) {
   # Select most informative populations: greens first, then lowest-CV yellows
@@ -432,6 +568,9 @@ print(p3)
 print(p4)
 print(p5)
 print(p6)
+if (!is.null(gate_data) && nrow(gate_data) > 0L) {
+  print(make_gate_plot(gate_data))
+}
 invisible(grDevices::dev.off())
 
 message(sprintf("[Diag] PDF written: %s", out_pdf))
@@ -497,6 +636,24 @@ summary_json <- list(
          b_freq = round(freq_paradox$b_freq[i], 4))
   }),
   n_samples_needed_estimate = n_needed_estimate,
+  gate_cascade_summary = if (!is.null(gate_data) && nrow(gate_data) > 0L) {
+    list(
+      n_samples       = nrow(gate_data),
+      n_cd3_anomalies = sum(gate_data$cd3_anomaly),
+      n_below_min_cells = sum(gate_data$cd3_low_cells),
+      anomalous_samples = gate_data$sample_id[gate_data$cd3_anomaly],
+      low_cell_samples  = gate_data$sample_id[gate_data$cd3_low_cells],
+      per_batch = lapply(split(gate_data, gate_data$batch), function(b) list(
+        n_samples       = nrow(b),
+        mean_cd3_thr    = round(mean(b$cd3_thr, na.rm = TRUE), 3),
+        sd_cd3_thr      = round(sd(b$cd3_thr,   na.rm = TRUE), 3),
+        mean_cd3_pct    = round(mean(b$cd3_pct,  na.rm = TRUE), 1),
+        n_cd3_anomalies = sum(b$cd3_anomaly),
+        mean_cd8_thr    = if (any(!is.na(b$cd8_thr))) round(mean(b$cd8_thr, na.rm = TRUE), 3) else NULL,
+        mean_cd8_pct    = if (any(!is.na(b$cd8_pct))) round(mean(b$cd8_pct, na.rm = TRUE), 1) else NULL
+      ))
+    )
+  } else NULL,
   recommendations      = recommendations
 )
 

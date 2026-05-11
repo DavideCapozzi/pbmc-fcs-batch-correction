@@ -73,7 +73,8 @@ tryCatch({
       uninformative_gap         = as.numeric(config$auto_phenotyping$uninformative_gap %||% 0.5),
       low_reliability_threshold = as.numeric(config$auto_phenotyping$low_reliability_threshold %||% 0.30),
       kmeans_nstart             = as.integer(config$auto_phenotyping$kmeans$nstart  %||% 10L),
-      kmeans_iter_max           = as.integer(config$auto_phenotyping$kmeans$iter_max %||% 50L)
+      kmeans_iter_max           = as.integer(config$auto_phenotyping$kmeans$iter_max %||% 50L),
+      marker_min_thresholds     = config$auto_phenotyping$marker_min_thresholds %||% list()
     ),
     error = function(e) {
       warning(sprintf("[Step 05] Auto-phenotyping failed: %s — continuing without labels.",

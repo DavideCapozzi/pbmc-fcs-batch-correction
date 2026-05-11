@@ -230,7 +230,8 @@ run_auto_phenotyping <- function(centroids_list,
                                  uninformative_gap         = 0.5,
                                  low_reliability_threshold = 0.30,
                                  kmeans_nstart             = 10L,
-                                 kmeans_iter_max           = 50L) {
+                                 kmeans_iter_max           = 50L,
+                                 marker_min_thresholds     = list()) {
   stopifnot(
     is.list(centroids_list), length(centroids_list) >= 1L,
     is.data.frame(match_table),
@@ -277,6 +278,24 @@ run_auto_phenotyping <- function(centroids_list,
                                 kmeans_iter_max = kmeans_iter_max)
   } else {
     setNames(rep(NA_real_, length(avail_m_global)), avail_m_global)
+  }
+
+  # Apply per-marker minimum threshold floors from config.
+  # Prevents saturation where k-means places the threshold below most centroids
+  # (e.g. KI67 at low n: all populations receive the same positive/negative label).
+  if (length(marker_min_thresholds) > 0L) {
+    for (mk in names(marker_min_thresholds)) {
+      floor_val <- as.numeric(marker_min_thresholds[[mk]])
+      if (!is.na(floor_val) && mk %in% names(global_thresholds) &&
+          !is.na(global_thresholds[[mk]])) {
+        original <- global_thresholds[[mk]]
+        global_thresholds[[mk]] <- max(global_thresholds[[mk]], floor_val)
+        if (global_thresholds[[mk]] > original) {
+          message(sprintf("[AutoPheno] %s threshold raised from %.3f to floor %.3f",
+                          mk, original, floor_val))
+        }
+      }
+    }
   }
 
   all_rows            <- list()

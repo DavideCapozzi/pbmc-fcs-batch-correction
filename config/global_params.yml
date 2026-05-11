@@ -80,6 +80,21 @@ qc:
   max_pct_removed: 85
   min_cells_final: 5000
 
+cd3_gate:
+  enabled: true             # Restrict SCE to CD3+ T cells before clustering
+  uninformative_gap: 1.0    # Min arcsinh gap between k-means centers; below this uses fallback
+  fallback_threshold: 4.0   # arcsinh CD3 threshold when k-means gap is too small
+  min_cd3_pct: 10.0         # Warn (not error) if < 10% of sample cells pass CD3 gate
+
+cd8_gate:
+  enabled: false            # DISABLED: CD8 MFI is instrument-specific (Assay Effect) — per-sample
+                            # k-means gives thresholds 6.5-7.7 arcsinh in duraclone vs ~5.0 in PL,
+                            # excluding most cells in the CD8-exhaustion panel. Not recoverable
+                            # without MFI correction (which we deliberately avoid).
+  uninformative_gap: 1.0
+  fallback_threshold: 3.5
+  min_cd8_pct: 10.0
+
 correction:
   xdim: 10
   ydim: 10
@@ -114,6 +129,10 @@ auto_phenotyping:
   kmeans:
     nstart: 10     # number of random restarts for 1D k-means
     iter_max: 50   # maximum iterations per k-means run
+  marker_min_thresholds:          # Per-marker floor for k-means threshold (arcsinh units)
+    KI67: 6.5                     # All observed centroids are 4.8-6.2; floor at 6.5 suppresses
+                                  # the (Proliferating) tag universally — KI67 staining appears
+                                  # non-specifically high across all populations in both panels
 
 scoring:
   run_patient_scoring: true
@@ -135,5 +154,29 @@ dimred:
 
 batch_labels:
   ds_old: "pannelli_liquidi"   # merge DS old into the same batch as TEX pannelli
+
+# Manual population labels (override auto-phenotyping).
+# Assigned by centroid inspection (run 2026-05-08 artifacts).
+# Lineage: CD3/CD8/CD45RA/CCR7/CD28. KI67/PD1/CD137 omitted (unreliable at current n).
+# Re-verify after any re-clustering (new seed, n, or grid size).
+population_labels:
+  pop_1:  "Central Memory CD8+ T cell"
+  pop_2:  "Naive CD8+ T cell"
+  pop_3:  "Effector-like CD8+ T cell"
+  pop_4:  "Transitional CD8+ T cell"
+  pop_5:  "CD8+ T cell (CD3dim)"
+  pop_6:  "Naive CD8+ T cell (CD28+)"
+  pop_7:  "Non-T cell (NK/Monocyte)"
+  pop_8:  "Non-T cell"
+  pop_9:  "CD8+ T cell (CD45RA+ CD28+)"
+  pop_10: "CD8+ T cell (CD3dim in duraclone)"
+  pop_11: "Naive CD4+ T cell (freq paradox)"
+  pop_12: "TEMRA CD8+ T cell"
+  pop_13: "Unresolved (freq paradox)"
+  pop_14: "Unresolved"
+  pop_15: "Dim/Debris population"
+  pop_16: "Unresolved"
+  pop_17: "Unresolved"
+  pop_18: "Unresolved"
 
 EOF: TRUE

@@ -137,6 +137,166 @@ tryCatch({
     colData = meta_data
   )
 
+  # CD3+ gate (optional): restrict SCE to CD3+ T cells before clustering.
+  # Frequencies after this gate are expressed as % of CD3+ cells, not total PBMCs —
+  # consistent with standard clinical immunology reporting (EuroFlow, NCI BioBank).
+  if (isTRUE(config$cd3_gate$enabled) && "CD3" %in% rownames(sce)) {
+    message("[Step 02] CD3+ gate enabled — restricting to CD3+ T cells.")
+
+    cd3_gap_thr  <- as.numeric(config$cd3_gate$uninformative_gap %||% 1.0)
+    cd3_fallback <- as.numeric(config$cd3_gate$fallback_threshold %||% 4.0)
+    min_cd3_pct  <- as.numeric(config$cd3_gate$min_cd3_pct        %||% 10.0)
+
+    cd3_expr   <- assay(sce, "exprs")["CD3", ]
+    sample_ids <- sce$sample_id
+    keep_cells <- logical(ncol(sce))
+    cd3_metrics <- list()
+
+    for (sid in unique(sample_ids)) {
+      idx      <- which(sample_ids == sid)
+      vals     <- cd3_expr[idx]
+      n_before <- length(vals)
+
+      thr <- tryCatch({
+        km   <- kmeans(vals, centers = 2L, nstart = 10L, iter.max = 50L)
+        ctrs <- sort(km$centers[, 1L])
+        gap  <- ctrs[2L] - ctrs[1L]
+        if (gap < cd3_gap_thr) {
+          message(sprintf("   [CD3 gate] '%s': k-means gap=%.2f < %.2f — fallback thr=%.2f",
+                          sid, gap, cd3_gap_thr, cd3_fallback))
+          cd3_fallback
+        } else {
+          mean(ctrs)
+        }
+      }, error = function(e) {
+        warning(sprintf("[CD3 gate] k-means failed for '%s': %s — fallback thr=%.2f",
+                        sid, e$message, cd3_fallback), call. = FALSE)
+        cd3_fallback
+      })
+
+      pos_idx <- idx[vals > thr]
+      n_after <- length(pos_idx)
+      pct_cd3 <- 100 * n_after / n_before
+
+      if (pct_cd3 < min_cd3_pct) {
+        warning(sprintf("[CD3 gate] '%s': only %.1f%% CD3+ (thr=%.2f) — verify acquisition.",
+                        sid, pct_cd3, thr), call. = FALSE)
+      }
+      min_cells_ok <- as.integer(config$qc$min_cells_final %||% 5000L)
+      if (n_after < min_cells_ok) {
+        warning(sprintf("[CD3 gate] '%s': only %d CD3+ cells remain (min=%d) — too few for clustering.",
+                        sid, n_after, min_cells_ok), call. = FALSE)
+      }
+
+      keep_cells[pos_idx] <- TRUE
+      cd3_metrics[[sid]]  <- list(
+        n_before  = n_before,
+        n_after   = n_after,
+        pct_cd3   = round(pct_cd3, 1L),
+        threshold = round(thr, 3L)
+      )
+      message(sprintf("   [CD3 gate] %-35s %d → %d (%.1f%% CD3+, thr=%.2f)",
+                      sid, n_before, n_after, pct_cd3, thr))
+    }
+
+    n_before_gate <- ncol(sce)
+    sce           <- sce[, keep_cells]
+    n_after_gate  <- ncol(sce)
+
+    message(sprintf("[Step 02] CD3 gate: %d → %d cells (%.1f%% retained)",
+                    n_before_gate, n_after_gate,
+                    100 * n_after_gate / n_before_gate))
+
+    add_metric(log_obj, "cd3_gate_applied",      TRUE)
+    add_metric(log_obj, "cd3_gate_n_before",     n_before_gate)
+    add_metric(log_obj, "cd3_gate_n_after",      n_after_gate)
+    add_metric(log_obj, "cd3_gate_pct_retained", round(100 * n_after_gate / n_before_gate, 1L))
+    add_metric(log_obj, "cd3_gate_per_sample",   cd3_metrics)
+    add_metric(log_obj, "n_cells_final",         n_after_gate)
+  } else {
+    add_metric(log_obj, "cd3_gate_applied", FALSE)
+  }
+
+  # CD8+ gate (optional): further restrict to CD8+ T cells after the CD3 gate.
+  # Aligns the denominator with DuraClone TEX panel design (CD8 exhaustion panel).
+  # Frequencies after this gate are expressed as % of CD8+ T cells.
+  if (isTRUE(config$cd8_gate$enabled) && "CD8" %in% rownames(sce)) {
+    message("[Step 02] CD8+ gate enabled — restricting to CD8+ T cells.")
+
+    cd8_gap_thr  <- as.numeric(config$cd8_gate$uninformative_gap %||% 1.0)
+    cd8_fallback <- as.numeric(config$cd8_gate$fallback_threshold %||% 3.5)
+    min_cd8_pct  <- as.numeric(config$cd8_gate$min_cd8_pct        %||% 10.0)
+
+    cd8_expr   <- assay(sce, "exprs")["CD8", ]
+    sample_ids <- sce$sample_id
+    keep_cells <- logical(ncol(sce))
+    cd8_metrics <- list()
+
+    for (sid in unique(sample_ids)) {
+      idx      <- which(sample_ids == sid)
+      vals     <- cd8_expr[idx]
+      n_before <- length(vals)
+
+      thr <- tryCatch({
+        km   <- kmeans(vals, centers = 2L, nstart = 10L, iter.max = 50L)
+        ctrs <- sort(km$centers[, 1L])
+        gap  <- ctrs[2L] - ctrs[1L]
+        if (gap < cd8_gap_thr) {
+          message(sprintf("   [CD8 gate] '%s': k-means gap=%.2f < %.2f — fallback thr=%.2f",
+                          sid, gap, cd8_gap_thr, cd8_fallback))
+          cd8_fallback
+        } else {
+          mean(ctrs)
+        }
+      }, error = function(e) {
+        warning(sprintf("[CD8 gate] k-means failed for '%s': %s — fallback thr=%.2f",
+                        sid, e$message, cd8_fallback), call. = FALSE)
+        cd8_fallback
+      })
+
+      pos_idx <- idx[vals > thr]
+      n_after <- length(pos_idx)
+      pct_cd8 <- 100 * n_after / n_before
+
+      if (pct_cd8 < min_cd8_pct) {
+        warning(sprintf("[CD8 gate] '%s': only %.1f%% CD8+ (thr=%.2f) — verify acquisition.",
+                        sid, pct_cd8, thr), call. = FALSE)
+      }
+      min_cells_ok <- as.integer(config$qc$min_cells_final %||% 5000L)
+      if (n_after < min_cells_ok) {
+        warning(sprintf("[CD8 gate] '%s': only %d CD8+ cells remain (min=%d) — too few for clustering.",
+                        sid, n_after, min_cells_ok), call. = FALSE)
+      }
+
+      keep_cells[pos_idx] <- TRUE
+      cd8_metrics[[sid]]  <- list(
+        n_before  = n_before,
+        n_after   = n_after,
+        pct_cd8   = round(pct_cd8, 1L),
+        threshold = round(thr, 3L)
+      )
+      message(sprintf("   [CD8 gate] %-35s %d → %d (%.1f%% CD8+, thr=%.2f)",
+                      sid, n_before, n_after, pct_cd8, thr))
+    }
+
+    n_before_gate <- ncol(sce)
+    sce           <- sce[, keep_cells]
+    n_after_gate  <- ncol(sce)
+
+    message(sprintf("[Step 02] CD8 gate: %d → %d cells (%.1f%% retained)",
+                    n_before_gate, n_after_gate,
+                    100 * n_after_gate / n_before_gate))
+
+    add_metric(log_obj, "cd8_gate_applied",      TRUE)
+    add_metric(log_obj, "cd8_gate_n_before",     n_before_gate)
+    add_metric(log_obj, "cd8_gate_n_after",      n_after_gate)
+    add_metric(log_obj, "cd8_gate_pct_retained", round(100 * n_after_gate / n_before_gate, 1L))
+    add_metric(log_obj, "cd8_gate_per_sample",   cd8_metrics)
+    add_metric(log_obj, "n_cells_final",         n_after_gate)
+  } else {
+    add_metric(log_obj, "cd8_gate_applied", FALSE)
+  }
+
   out_file <- file.path(out_dir, "filtered_sce.rds")
   saveRDS(sce, out_file)
   message(sprintf("[Step 02] Artifact saved: %s", out_file))

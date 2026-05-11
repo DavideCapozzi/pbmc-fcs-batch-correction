@@ -284,6 +284,74 @@ gate_cascade <- function(file_path, qc_config, sample_id) {
 }
 
 # ------------------------------------------------------------------------------
+# [F] CD3 / CD8 arcsinh gate analysis
+# Applies arcsinh(x / cofactor) to CD3 and CD8 channels and runs a k-means(k=2)
+# bimodality analysis. Produces:
+#   center_low / center_high  — k-means cluster centres
+#   gap                       — separation between centres; < uninformative_gap → fallback fires
+#   recommended_threshold     — midpoint (midway between centres); NULL if not bimodal
+#   pct_positive_at_recommended — fraction of events above the recommended threshold
+#   anomaly_low_threshold     — TRUE when threshold < 2.0 arcsinh (suspicious: DS004/DS005 pattern)
+#   threshold_sweep           — %positive at candidate thresholds 2.0 → 8.0 arcsinh (step 0.5)
+# ------------------------------------------------------------------------------
+
+analyse_arcsinh_gate <- function(ff, cofactor = 150, marker = "CD3",
+                                  gap_threshold = 1.0,
+                                  thr_sweep = seq(2.0, 8.0, by = 0.5)) {
+  params  <- flowCore::pData(flowCore::parameters(ff))
+  mat     <- flowCore::exprs(ff)
+
+  pns_col <- if ("desc" %in% colnames(params)) params$desc else rep(NA_character_, nrow(params))
+  pnn_col <- params$name
+  pat     <- paste0("(?i)^", marker, "\\b")
+  ch_idx  <- which(grepl(pat, pns_col, perl = TRUE) | grepl(pat, pnn_col, perl = TRUE))
+
+  if (length(ch_idx) == 0L) return(list(channel_found = FALSE))
+
+  ch_name <- pnn_col[ch_idx[1L]]
+  ch_desc <- pns_col[ch_idx[1L]]
+  if (!(ch_name %in% colnames(mat))) return(list(channel_found = FALSE))
+
+  vals <- asinh(mat[, ch_name] / cofactor)
+  vals <- vals[is.finite(vals)]
+
+  if (length(vals) < 50L)
+    return(list(channel_found = TRUE, channel_raw = ch_name,
+                n_events = length(vals), too_few_events = TRUE))
+
+  km <- tryCatch(kmeans(vals, centers = 2L, nstart = 10L, iter.max = 50L),
+                 error = function(e) NULL)
+  if (is.null(km))
+    return(list(channel_found = TRUE, channel_raw = ch_name, kmeans_failed = TRUE))
+
+  ctrs     <- sort(km$centers[, 1L])
+  gap      <- ctrs[2L] - ctrs[1L]
+  midpoint <- mean(ctrs)
+  bimodal  <- gap >= gap_threshold
+
+  sweep_res <- setNames(
+    round(sapply(thr_sweep, function(t) mean(vals > t)), 4),
+    paste0("thr_", gsub("\\.", "_", sprintf("%.1f", thr_sweep)))
+  )
+
+  list(
+    channel_found               = TRUE,
+    channel_raw                 = ch_name,
+    channel_desc                = if (!is.na(ch_desc) && nzchar(ch_desc)) ch_desc else NULL,
+    n_events                    = length(vals),
+    center_low                  = round(ctrs[1L], 3),
+    center_high                 = round(ctrs[2L], 3),
+    gap                         = round(gap, 3),
+    recommended_threshold       = if (bimodal) round(midpoint, 3) else NULL,
+    pct_positive_at_recommended = if (bimodal) round(mean(vals > midpoint), 4) else NULL,
+    bimodal                     = bimodal,
+    fallback_would_fire         = !bimodal,
+    anomaly_low_threshold       = bimodal && midpoint < 2.0,
+    threshold_sweep_pct_positive = as.list(sweep_res)
+  )
+}
+
+# ------------------------------------------------------------------------------
 # MAIN
 # ------------------------------------------------------------------------------
 
@@ -396,6 +464,14 @@ analyse_file <- function(i) {
   )
 
   entry$gate_cascade <- suppressMessages(gate_cascade(fpath, qc_cfg, fname))
+
+  cofactor_val <- as.numeric(config$markers$transform_cofactor %||% 150)
+  entry$cd3_cd8_gate <- list(
+    CD3 = tryCatch(analyse_arcsinh_gate(ff, cofactor_val, "CD3"),
+                   error = function(e) list(error = conditionMessage(e))),
+    CD8 = tryCatch(analyse_arcsinh_gate(ff, cofactor_val, "CD8"),
+                   error = function(e) list(error = conditionMessage(e)))
+  )
 
   cascade_reason   <- entry$gate_cascade$exclusion_reason %||% "unknown"
   entry$qc_outcome <- if (grepl("^passed", cascade_reason)) "PASSED" else "EXCLUDED"
@@ -531,6 +607,52 @@ baseline_adequacy_projection <- list(
   ))
 )
 
+# CD3/CD8 gate summary across all passing files
+gate_summary_for <- function(all_names, marker) {
+  rows <- lapply(all_names, function(n) {
+    g <- file_results[[n]]$cd3_cd8_gate[[marker]]
+    if (is.null(g) || !isTRUE(g$channel_found)) return(NULL)
+    data.frame(
+      file      = n,
+      batch     = file_results[[n]]$batch,
+      threshold = g$recommended_threshold %||% NA_real_,
+      pct_pos   = g$pct_positive_at_recommended %||% NA_real_,
+      gap       = g$gap %||% NA_real_,
+      bimodal   = isTRUE(g$bimodal),
+      anomaly   = isTRUE(g$anomaly_low_threshold),
+      fallback  = isTRUE(g$fallback_would_fire),
+      stringsAsFactors = FALSE
+    )
+  })
+  rows <- do.call(rbind, Filter(Negate(is.null), rows))
+  if (is.null(rows) || nrow(rows) == 0L) return(list(n_files = 0L))
+
+  by_batch <- lapply(split(rows, rows$batch), function(b) list(
+    n_files             = nrow(b),
+    n_bimodal           = sum(b$bimodal),
+    n_fallback          = sum(b$fallback),
+    n_anomaly_low_thr   = sum(b$anomaly),
+    mean_threshold      = mean_or_null(b$threshold),
+    sd_threshold        = if (sum(!is.na(b$threshold)) > 1) round(sd(b$threshold, na.rm = TRUE), 3) else NULL,
+    mean_pct_positive   = mean_or_null(b$pct_pos),
+    anomalous_files     = b$file[b$anomaly]
+  ))
+
+  list(
+    n_files           = nrow(rows),
+    n_bimodal         = sum(rows$bimodal),
+    n_fallback_fires  = sum(rows$fallback),
+    n_anomaly_low_thr = sum(rows$anomaly),
+    anomalous_files   = rows$file[rows$anomaly],
+    fallback_files    = rows$file[rows$fallback],
+    per_batch         = by_batch
+  )
+}
+
+all_names <- c(excluded_names, passing_names)
+cd3_gate_summary <- gate_summary_for(all_names, "CD3")
+cd8_gate_summary <- gate_summary_for(all_names, "CD8")
+
 comparison_summary <- list(
   n_files_total   = nrow(all_files),
   n_excluded      = length(excluded_names),
@@ -541,6 +663,7 @@ comparison_summary <- list(
   n_irrecoverable_by_peacoqc = n_irrecoverable,
   per_batch_summary           = per_batch_summary,
   baseline_adequacy_projection = baseline_adequacy_projection,
+  cd3_cd8_gate_summary = list(CD3 = cd3_gate_summary, CD8 = cd8_gate_summary),
   metrics_comparison = list(
     mean_pct_peacoqc_removed = list(
       excluded = mean_or_null(excl_pct_pqc),
